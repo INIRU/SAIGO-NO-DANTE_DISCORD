@@ -5,6 +5,13 @@ import { buildIdentityView } from '../components/identity-view.js';
 import { buildEgoView } from '../components/ego-view.js';
 
 export async function handleSelectMenu(interaction: StringSelectMenuInteraction) {
+  // 원래 명령어 사용자만 드롭다운 사용 가능
+  const originalUserId = interaction.message.interactionMetadata?.user?.id;
+  if (originalUserId && originalUserId !== interaction.user.id) {
+    await interaction.reply({ content: '본인이 실행한 명령어만 조작할 수 있습니다.', ephemeral: true });
+    return;
+  }
+
   const [action] = interaction.customId.split(':');
   const selectedId = interaction.values[0];
 

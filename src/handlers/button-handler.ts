@@ -8,6 +8,13 @@ import { buildEgoView, buildEgoPassiveView } from '../components/ego-view.js';
 import { buildKeywordView } from '../components/search-results.js';
 
 export async function handleButton(interaction: ButtonInteraction) {
+  // 원래 명령어 사용자만 버튼 사용 가능
+  const originalUserId = interaction.message.interactionMetadata?.user?.id;
+  if (originalUserId && originalUserId !== interaction.user.id) {
+    await interaction.reply({ content: '본인이 실행한 명령어만 조작할 수 있습니다.', ephemeral: true });
+    return;
+  }
+
   const [action, ...params] = interaction.customId.split(':');
 
   await interaction.deferUpdate();

@@ -102,7 +102,7 @@ export function buildEgoView(ego: EgoData, showCorrosion = false, construeLevel 
     const skillLines = [
       `## ${skillLabel} — ${skill.name}`,
       `> ${atkLabel(skill.atkType.toLowerCase())} · 위력 \`${skill.power}\``,
-      `> 코인 위력 \`${sign}${skill.coinPower}\` · ${statEmoji('coin')} \`${skill.coinNum}\` · 가중치 \`${skill.atkWeight}\``,
+      `> 코인 위력 \`${sign}${skill.coinPower}\` · 코인 \`${skill.coinNum}\` · 가중치 \`${skill.atkWeight}\``,
       skill.normalEffect ? `\n${replaceKeywordsWithEmoji(skill.normalEffect)}` : null,
       ...([skill.coin1Effect, skill.coin2Effect, skill.coin3Effect, skill.coin4Effect, skill.coin5Effect]
         .filter(Boolean)
