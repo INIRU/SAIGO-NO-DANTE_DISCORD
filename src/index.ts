@@ -8,6 +8,8 @@ import * as sinnerCmd from './commands/sinner.js';
 import * as keywordCmd from './commands/keyword.js';
 import * as egoGiftCmd from './commands/ego-gift.js';
 import * as helpCmd from './commands/help.js';
+import * as notificationCmd from './commands/notification.js';
+import { startFeedPoller } from './services/feed-poller.js';
 
 const commandData = [
   identityCmd.data.toJSON(),
@@ -16,6 +18,7 @@ const commandData = [
   keywordCmd.data.toJSON(),
   egoGiftCmd.data.toJSON(),
   helpCmd.data.toJSON(),
+  notificationCmd.data.toJSON(),
 ];
 
 const client = new Client({
@@ -40,6 +43,9 @@ client.once(Events.ClientReady, async (c) => {
     );
     console.log(`[Bot] 테스트 서버(${config.discord.devGuildId})에 길드 커맨드 등록 완료!`);
   }
+
+  // 피드 폴링 시작
+  startFeedPoller(c);
 });
 
 client.on(Events.InteractionCreate, handleInteraction);

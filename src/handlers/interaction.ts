@@ -5,6 +5,7 @@ import * as sinnerCmd from '../commands/sinner.js';
 import * as keywordCmd from '../commands/keyword.js';
 import * as egoGiftCmd from '../commands/ego-gift.js';
 import * as helpCmd from '../commands/help.js';
+import * as notificationCmd from '../commands/notification.js';
 import { handleButton } from './button-handler.js';
 import { handleSelectMenu } from './select-handler.js';
 
@@ -20,6 +21,7 @@ const commands = new Map<string, Command>([
   ['키워드', keywordCmd],
   ['기프트', egoGiftCmd],
   ['도움말', helpCmd],
+  ['알림설정', notificationCmd],
 ]);
 
 export async function handleInteraction(interaction: Interaction) {
