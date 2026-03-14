@@ -7,6 +7,7 @@ import * as sinnerCmd from './commands/sinner.js';
 import * as keywordCmd from './commands/keyword.js';
 import * as egoGiftCmd from './commands/ego-gift.js';
 import * as helpCmd from './commands/help.js';
+import * as notificationCmd from './commands/notification.js';
 
 const commands = [
   identityCmd.data.toJSON(),
@@ -15,6 +16,7 @@ const commands = [
   keywordCmd.data.toJSON(),
   egoGiftCmd.data.toJSON(),
   helpCmd.data.toJSON(),
+  notificationCmd.data.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(config.discord.token);
