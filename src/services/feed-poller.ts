@@ -3,7 +3,7 @@ import { getAllGuildsWithNotifications, getFeedTracker, updateFeedTracker } from
 
 
 const STEAM_APP_ID = '1973530';
-const STEAM_RSS_URL = `https://store.steampowered.com/feeds/news/app/${STEAM_APP_ID}/`;
+const STEAM_RSS_URL = `https://store.steampowered.com/feeds/news/app/${STEAM_APP_ID}/?l=koreana`;
 const POLL_INTERVAL = 5 * 60 * 1000; // 5분
 
 interface FeedItem {
@@ -15,7 +15,28 @@ interface FeedItem {
   image?: string;
 }
 
-/** RSS XML 파싱 (간단한 파서) */
+/** HTML 엔티티 디코딩 */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+
+/** HTML → 깔끔한 텍스트 (줄바꿈 보존) */
+function htmlToCleanText(html: string): string {
+  return decodeHtmlEntities(html)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<b>(.*?)<\/b>/gi, '**$1**')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** RSS XML 파싱 */
 function parseRssItems(xml: string): FeedItem[] {
   const items: FeedItem[] = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
@@ -24,21 +45,26 @@ function parseRssItems(xml: string): FeedItem[] {
   while ((match = itemRegex.exec(xml)) !== null) {
     const content = match[1];
     const getTag = (tag: string) => {
-      const m = content.match(new RegExp(`<${tag}>(.*?)</${tag}>`, 's'));
+      const m = content.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
       return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : '';
     };
 
-    // 이미지 추출 (description 내 img 태그)
-    const desc = getTag('description');
-    const imgMatch = desc.match(/<img[^>]+src="([^"]+)"/);
+    // enclosure 태그에서 이미지 URL 추출
+    const enclosureMatch = content.match(/<enclosure\s+url="([^"]+)"/);
+    // description 내 img 태그에서도 추출
+    const rawDesc = getTag('description');
+    const decodedDesc = decodeHtmlEntities(rawDesc);
+    const imgMatch = decodedDesc.match(/<img[^>]+src="([^"]+)"/);
+
+    const cleanDesc = htmlToCleanText(rawDesc);
 
     items.push({
-      title: getTag('title'),
+      title: decodeHtmlEntities(getTag('title')),
       link: getTag('link'),
-      description: desc.replace(/<[^>]+>/g, '').slice(0, 200),
+      description: cleanDesc.slice(0, 300),
       pubDate: getTag('pubDate'),
       guid: getTag('guid') || getTag('link'),
-      image: imgMatch?.[1],
+      image: enclosureMatch?.[1] || imgMatch?.[1],
     });
   }
 
@@ -99,8 +125,9 @@ function buildNotificationMessage(item: FeedItem, source: string) {
   // 날짜
   if (item.pubDate) {
     const date = new Date(item.pubDate);
+    const dateStr = date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`-# ${date.toLocaleDateString('ko-KR')}`)
+      new TextDisplayBuilder().setContent(`-# ${dateStr}`)
     );
   }
 
