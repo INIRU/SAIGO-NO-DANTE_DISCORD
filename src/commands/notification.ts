@@ -11,6 +11,7 @@ import {
 } from 'discord.js';
 import { SITE_COLORS } from '../constants/colors.js';
 import { getGuildSettings, setNotificationChannel, toggleSource } from '../db/guild-settings.js';
+import { fetchLatestSteamPost } from '../services/feed-poller.js';
 
 export const data = new SlashCommandBuilder()
   .setName('알림설정')
@@ -29,6 +30,10 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(sub =>
     sub.setName('상태')
       .setDescription('현재 알림 설정을 확인합니다')
+  )
+  .addSubcommand(sub =>
+    sub.setName('테스트')
+      .setDescription('최신 Steam 공지를 미리봅니다 (관리자 전용)')
   )
   .addSubcommand(sub =>
     sub.setName('토글')
@@ -108,6 +113,20 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         components: [container],
         flags: MessageFlags.IsComponentsV2,
       });
+      break;
+    }
+
+    case '테스트': {
+      await interaction.deferReply();
+      const result = await fetchLatestSteamPost();
+      if (result) {
+        await interaction.editReply({
+          components: [result],
+          flags: MessageFlags.IsComponentsV2,
+        });
+      } else {
+        await interaction.editReply({ content: 'Steam 피드를 가져올 수 없습니다.' });
+      }
       break;
     }
 

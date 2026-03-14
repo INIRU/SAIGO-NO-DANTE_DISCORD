@@ -58,6 +58,13 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
   }
 }
 
+/** 최신 Steam 글 1개를 가져와서 메시지로 빌드 (테스트용) */
+export async function fetchLatestSteamPost() {
+  const items = await fetchSteamFeed();
+  if (items.length === 0) return null;
+  return buildNotificationMessage(items[0], 'steam');
+}
+
 /** 알림 메시지 빌드 */
 function buildNotificationMessage(item: FeedItem, source: string) {
   const container = new ContainerBuilder()
