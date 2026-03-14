@@ -141,11 +141,10 @@ const EFFECT_LABELS: Record<string, string> = { base: '기본', plus: '+', plusp
 export function buildEgoGiftView(gift: GiftData, tab: string = 'base') {
   const container = new ContainerBuilder().setAccentColor(0xc8900a);
 
-  const tierStr = gift.tier ? (TIER_ROMAN[gift.tier] ?? `T${gift.tier}`) : '';
-  const gradeStr = gift.grade ? `${gift.grade}` : '';
+  const tierDisplay = gift.tier ? (TIER_ROMAN[gift.tier] ?? gift.tier) : (gift.grade ? (TIER_ROMAN[gift.grade] ?? gift.grade) : '');
   const headerLines = [
     `# ${gift.name}`,
-    gradeStr || tierStr ? `> ${[gradeStr, tierStr].filter(Boolean).join(' · ')}` : null,
+    tierDisplay ? `> ${tierDisplay}` : null,
     gift.keyword ? `> 🔑 ${replaceKeywordsWithEmoji(gift.keyword)}${gift.price ? ` · 💰 ${gift.price}` : ''}` : null,
   ].filter(Boolean).join('\n');
 
