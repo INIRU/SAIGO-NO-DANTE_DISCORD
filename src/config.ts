@@ -24,4 +24,7 @@ export const config = {
     schema: 'limbus' as const,
   },
   storageBase: 'https://lpgqcleszdlldneiwgep.supabase.co/storage/v1/object/public/limbus-assets',
+  gemini: {
+    apiKeys: (process.env.GEMINI_API_KEYS ?? '').split(',').filter(Boolean),
+  },
 } as const;

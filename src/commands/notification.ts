@@ -121,7 +121,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const result = await fetchLatestSteamPost();
       if (result) {
         await interaction.editReply({
-          components: [result],
+          components: [result.container],
+          files: result.bannerFile ? [result.bannerFile] : [],
           flags: MessageFlags.IsComponentsV2,
         });
       } else {

@@ -1,5 +1,7 @@
-import { type Client, ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, type MessageActionRowComponentBuilder, MessageFlags, type TextChannel } from 'discord.js';
+import { type Client, ContainerBuilder, TextDisplayBuilder, FileBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, type MessageActionRowComponentBuilder, MessageFlags, AttachmentBuilder, type TextChannel } from 'discord.js';
+import { generateBanner } from './banner.js';
 import { getAllGuildsWithNotifications, getFeedTracker, updateFeedTracker } from '../db/guild-settings.js';
+import { summarizeWithGemini } from './gemini.js';
 
 
 const STEAM_APP_ID = '1973530';
@@ -13,6 +15,7 @@ interface FeedItem {
   pubDate: string;
   guid: string;
   image?: string;
+  contentImages: string[]; // 본문 내 이미지 URLs
 }
 
 /** HTML 엔티티 디코딩 */
@@ -49,22 +52,35 @@ function parseRssItems(xml: string): FeedItem[] {
       return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : '';
     };
 
-    // enclosure 태그에서 이미지 URL 추출
+    // enclosure 태그에서 대표 이미지
     const enclosureMatch = content.match(/<enclosure\s+url="([^"]+)"/);
-    // description 내 img 태그에서도 추출
     const rawDesc = getTag('description');
     const decodedDesc = decodeHtmlEntities(rawDesc);
-    const imgMatch = decodedDesc.match(/<img[^>]+src="([^"]+)"/);
+
+    // 본문 내 모든 이미지 추출
+    const allImgs: string[] = [];
+    const imgRegex = /<img[^>]+src="([^"]+)"/g;
+    let imgM;
+    while ((imgM = imgRegex.exec(decodedDesc)) !== null) {
+      if (imgM[1].startsWith('http')) allImgs.push(imgM[1]);
+    }
+
+    // 유튜브 썸네일 추출
+    const ytMatch = decodedDesc.match(/youtube[^"]*\/embed\/([^?"]+)/);
+    if (ytMatch) {
+      allImgs.push(`https://img.youtube.com/vi/${ytMatch[1]}/maxresdefault.jpg`);
+    }
 
     const cleanDesc = htmlToCleanText(rawDesc);
 
     items.push({
       title: decodeHtmlEntities(getTag('title')),
       link: getTag('link'),
-      description: cleanDesc.slice(0, 300),
+      description: cleanDesc.slice(0, 2000),
       pubDate: getTag('pubDate'),
       guid: getTag('guid') || getTag('link'),
-      image: enclosureMatch?.[1] || imgMatch?.[1],
+      image: enclosureMatch?.[1] || allImgs[0],
+      contentImages: allImgs.slice(0, 4), // 최대 4장
     });
   }
 
@@ -88,50 +104,84 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
 export async function fetchLatestSteamPost() {
   const items = await fetchSteamFeed();
   if (items.length === 0) return null;
-  return buildNotificationMessage(items[0], 'steam');
+  return buildNotificationWithSummary(items[0], 'steam');
 }
 
-/** 알림 메시지 빌드 */
-function buildNotificationMessage(item: FeedItem, source: string) {
+/** Gemini로 요약 후 메시지 빌드 */
+async function buildNotificationWithSummary(item: FeedItem, source: string) {
+  // 요약 시도
+  if (item.description && item.description.length > 50) {
+    const summary = await summarizeWithGemini(item.description);
+    if (summary) {
+      return await buildNotificationMessage({ ...item, description: summary, contentImages: item.contentImages }, source);
+    }
+  }
+  // 요약 실패 시 원본 사용
+  return await buildNotificationMessage(item, source);
+}
+
+/** 알림 메시지 빌드 (배너 이미지 포함) */
+async function buildNotificationMessage(item: FeedItem, source: string) {
   const container = new ContainerBuilder()
     .setAccentColor(source === 'steam' ? 0x1b2838 : 0x1da1f2);
 
-  const sourceLabel = source === 'steam' ? '🎮 Steam 공지' : '🐦 X(Twitter)';
+  // 배너 이미지 생성
+  const dateStr = item.pubDate
+    ? new Date(item.pubDate).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })
+    : '';
 
-  const headerText = new TextDisplayBuilder().setContent(
-    `## ${sourceLabel}\n**${item.title}**`
-  );
-
-  if (item.image && item.image.startsWith('http')) {
-    const section = new SectionBuilder()
-      .addTextDisplayComponents(headerText)
-      .setThumbnailAccessory(
-        new ThumbnailBuilder({ media: { url: item.image } })
-      );
-    container.addSectionComponents(section);
-  } else {
-    container.addTextDisplayComponents(headerText);
+  let bannerFile: AttachmentBuilder | null = null;
+  try {
+    const bannerBuf = await generateBanner({
+      source: source as 'steam' | 'twitter',
+    });
+    bannerFile = new AttachmentBuilder(bannerBuf, { name: 'banner.png' });
+    const bannerGallery = new MediaGalleryBuilder()
+      .addItems(new MediaGalleryItemBuilder().setURL('attachment://banner.png'));
+    container.addMediaGalleryComponents(bannerGallery);
+  } catch (err) {
+    console.error('[Banner] 배너 생성 실패:', err);
   }
 
+  // 소스 라벨 + 제목 (텍스트로도 표시)
+  const sourceLabel = source === 'steam' ? '🎮 [Steam] Limbus Company 소식' : '🐦 [X] Limbus Company 소식';
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`## ${sourceLabel}\n# ${item.title}`)
+  );
+
+  // 본문
   if (item.description) {
     container.addSeparatorComponents(
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`> ${item.description.slice(0, 300)}${item.description.length > 300 ? '...' : ''}`)
+      new TextDisplayBuilder().setContent(item.description.slice(0, 500) + (item.description.length > 500 ? '\n...' : ''))
     );
   }
 
-  // 날짜
-  if (item.pubDate) {
-    const date = new Date(item.pubDate);
-    const dateStr = date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`-# ${dateStr}`)
+  // 본문 내 이미지 (MediaGallery) — 유효한 URL만
+  const validImages = (item.contentImages ?? []).filter(url =>
+    url.startsWith('https://') && !url.includes('placeholder')
+  );
+  if (validImages.length > 0) {
+    container.addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
+    const gallery = new MediaGalleryBuilder()
+      .addItems(...validImages.map(url =>
+        new MediaGalleryItemBuilder().setURL(url)
+      ));
+    container.addMediaGalleryComponents(gallery);
   }
 
-  // 원문 보기 버튼
+  // 푸터
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# ${dateStr} · [saigo-no-dante.com](https://saigo-no-dante.com)`)
+  );
+
   if (item.link) {
     const row = new ActionRowBuilder<MessageActionRowComponentBuilder>()
       .addComponents(
@@ -143,7 +193,7 @@ function buildNotificationMessage(item: FeedItem, source: string) {
     container.addActionRowComponents(row);
   }
 
-  return container;
+  return { container, bannerFile };
 }
 
 /** 새 피드 확인 & 알림 전송 */
@@ -153,10 +203,16 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
   const tracker = await getFeedTracker(source);
   const lastId = tracker?.last_id;
 
-  // 새 아이템 찾기
-  const newItems = lastId
-    ? items.filter(item => item.guid !== lastId).slice(0, 3) // 최대 3개
-    : []; // 첫 실행은 트래커만 설정
+  // 새 아이템 찾기 (lastId보다 앞에 있는 것만 = 더 새로운 것)
+  let newItems: FeedItem[] = [];
+  if (lastId) {
+    const lastIndex = items.findIndex(item => item.guid === lastId);
+    if (lastIndex > 0) {
+      newItems = items.slice(0, lastIndex).slice(0, 3); // lastId 이전 항목만, 최대 3개
+    }
+    // lastIndex === 0 → 새 글 없음, lastIndex === -1 → 피드가 완전히 바뀜 (무시)
+  }
+  // lastId 없으면 (첫 실행) → 트래커만 설정, 알림 안 보냄
 
   // 트래커 업데이트
   await updateFeedTracker(source, items[0].guid);
@@ -177,9 +233,10 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
       if (!channel?.isTextBased()) continue;
 
       for (const item of newItems.reverse()) {
-        const container = buildNotificationMessage(item, source);
+        const result = await buildNotificationWithSummary(item, source);
         await channel.send({
-          components: [container],
+          components: [result.container],
+          files: result.bannerFile ? [result.bannerFile] : [],
           flags: MessageFlags.IsComponentsV2,
         });
       }
