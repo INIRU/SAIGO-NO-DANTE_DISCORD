@@ -120,8 +120,7 @@ const TIER_ROMAN: Record<string, string> = {
   '1': 'Ⅰ', '2': 'Ⅱ', '3': 'Ⅲ', '4': 'Ⅳ', '5': 'Ⅴ',
 };
 
-/** EGO 기프트 뷰 */
-export function buildEgoGiftView(gift: {
+type GiftData = {
   id: string;
   name: string;
   keyword: string | null;
@@ -133,7 +132,13 @@ export function buildEgoGiftView(gift: {
   effect_plus: string | null;
   effect_plusplus: string | null;
   image_url: string | null;
-}) {
+};
+
+const EFFECT_TABS = ['base', 'plus', 'plusplus'] as const;
+const EFFECT_LABELS: Record<string, string> = { base: '기본', plus: '+', plusplus: '++' };
+
+/** EGO 기프트 뷰 (탭 전환) */
+export function buildEgoGiftView(gift: GiftData, tab: string = 'base') {
   const container = new ContainerBuilder().setAccentColor(0xc8900a);
 
   const tierStr = gift.tier ? (TIER_ROMAN[gift.tier] ?? `T${gift.tier}`) : '';
@@ -163,16 +168,36 @@ export function buildEgoGiftView(gift: {
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  const effectLines = [
-    gift.effect_base ? `**기본**: ${replaceKeywordsWithEmoji(gift.effect_base)}` : null,
-    gift.effect_plus ? `**+**: ${replaceKeywordsWithEmoji(gift.effect_plus)}` : null,
-    gift.effect_plusplus ? `**++**: ${replaceKeywordsWithEmoji(gift.effect_plusplus)}` : null,
-  ].filter(Boolean).join('\n');
+  // 현재 탭의 효과 표시
+  const effects: Record<string, string | null> = {
+    base: gift.effect_base,
+    plus: gift.effect_plus,
+    plusplus: gift.effect_plusplus,
+  };
 
-  if (effectLines) {
+  const currentEffect = effects[tab] ?? gift.effect_base;
+  if (currentEffect) {
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(effectLines)
+      new TextDisplayBuilder().setContent(
+        `## ${EFFECT_LABELS[tab] ?? '기본'} 효과\n${replaceKeywordsWithEmoji(currentEffect)}`
+      )
     );
+  }
+
+  // 탭 버튼 (효과가 있는 것만 표시)
+  const availableTabs = EFFECT_TABS.filter(t => effects[t]);
+  if (availableTabs.length > 1) {
+    const tabButtons = new ActionRowBuilder<MessageActionRowComponentBuilder>()
+      .addComponents(
+        ...availableTabs.map(t =>
+          new ButtonBuilder()
+            .setCustomId(`gift_tab:${gift.id}:${t}`)
+            .setLabel(EFFECT_LABELS[t])
+            .setStyle(t === tab ? ButtonStyle.Primary : ButtonStyle.Secondary)
+            .setDisabled(t === tab)
+        )
+      );
+    container.addActionRowComponents(tabButtons);
   }
 
   // 사이트 홍보

@@ -3,9 +3,10 @@ import { computeSkillMeta } from '../utils/format.js';
 import { getIdentityById, getSkillsByIdentity, getPassivesByIdentity, getIdentitiesBySinner } from '../db/identities.js';
 import { getEgoById } from '../db/ego.js';
 import { getKeywordMeta, getIdentitiesByKeyword } from '../db/keywords.js';
+import { getEgoGiftById } from '../db/ego-gifts.js';
 import { buildIdentityView, buildSkillDetailView, buildPassiveView } from '../components/identity-view.js';
 import { buildEgoView, buildEgoPassiveView } from '../components/ego-view.js';
-import { buildKeywordView } from '../components/search-results.js';
+import { buildKeywordView, buildEgoGiftView } from '../components/search-results.js';
 
 export async function handleButton(interaction: ButtonInteraction) {
   // 원래 명령어 사용자만 버튼 사용 가능
@@ -157,6 +158,16 @@ export async function handleButton(interaction: ButtonInteraction) {
       const ego = await getEgoById(egoId);
 
       const container = buildEgoView(ego);
+      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+      break;
+    }
+
+    case 'gift_tab': {
+      const giftId = params[0];
+      const tab = params[1] || 'base';
+      const gift = await getEgoGiftById(giftId);
+
+      const container = buildEgoGiftView(gift, tab);
       await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
       break;
     }
