@@ -196,6 +196,9 @@ async function buildNotificationMessage(item: FeedItem, source: string) {
   return { container, bannerFile };
 }
 
+// 실패한 길드 재시도 큐: { guildId → FeedItem[] }
+const retryQueue = new Map<string, { items: FeedItem[]; source: string }>();
+
 /** 새 피드 확인 & 알림 전송 */
 async function checkAndNotify(client: Client, source: string, items: FeedItem[]) {
   if (items.length === 0) return;
@@ -208,14 +211,15 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
   if (lastId) {
     const lastIndex = items.findIndex(item => item.guid === lastId);
     if (lastIndex > 0) {
-      newItems = items.slice(0, lastIndex).slice(0, 3); // lastId 이전 항목만, 최대 3개
+      newItems = items.slice(0, lastIndex).slice(0, 3);
     }
-    // lastIndex === 0 → 새 글 없음, lastIndex === -1 → 피드가 완전히 바뀜 (무시)
   }
-  // lastId 없으면 (첫 실행) → 트래커만 설정, 알림 안 보냄
 
   // 트래커 업데이트
   await updateFeedTracker(source, items[0].guid);
+
+  // 재시도 큐 처리
+  await processRetryQueue(client);
 
   if (newItems.length === 0) return;
 
@@ -227,22 +231,49 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
 
   for (const guild of guilds) {
     if (guild[sourceField] === false) continue;
+    await sendToGuild(client, guild.guild_id, guild.notification_channel_id, newItems, source);
+  }
+}
 
-    try {
-      const channel = await client.channels.fetch(guild.notification_channel_id) as TextChannel | null;
-      if (!channel?.isTextBased()) continue;
+/** 단일 길드에 전송 (실패 시 재시도 큐에 추가) */
+async function sendToGuild(client: Client, guildId: string, channelId: string, items: FeedItem[], source: string) {
+  try {
+    const channel = await client.channels.fetch(channelId) as TextChannel | null;
+    if (!channel?.isTextBased()) return;
 
-      for (const item of newItems.reverse()) {
-        const result = await buildNotificationWithSummary(item, source);
-        await channel.send({
-          components: [result.container],
-          files: result.bannerFile ? [result.bannerFile] : [],
-          flags: MessageFlags.IsComponentsV2,
-        });
-      }
-    } catch (err) {
-      console.error(`[Feed] 길드 ${guild.guild_id} 전송 실패:`, err);
+    for (const item of [...items].reverse()) {
+      const result = await buildNotificationWithSummary(item, source);
+      await channel.send({
+        components: [result.container],
+        files: result.bannerFile ? [result.bannerFile] : [],
+        flags: MessageFlags.IsComponentsV2,
+      });
     }
+
+    // 성공 시 재시도 큐에서 제거
+    retryQueue.delete(guildId);
+  } catch (err) {
+    console.error(`[Feed] 길드 ${guildId} 전송 실패, 재시도 큐에 추가:`, err);
+    retryQueue.set(guildId, { items, source });
+  }
+}
+
+/** 재시도 큐 처리 */
+async function processRetryQueue(client: Client) {
+  if (retryQueue.size === 0) return;
+
+  console.log(`[Feed] 재시도 큐: ${retryQueue.size}개 길드`);
+
+  const guilds = await getAllGuildsWithNotifications();
+  const guildMap = new Map(guilds.map(g => [g.guild_id, g.notification_channel_id]));
+
+  for (const [guildId, { items, source }] of retryQueue) {
+    const channelId = guildMap.get(guildId);
+    if (!channelId) {
+      retryQueue.delete(guildId);
+      continue;
+    }
+    await sendToGuild(client, guildId, channelId, items, source);
   }
 }
 
