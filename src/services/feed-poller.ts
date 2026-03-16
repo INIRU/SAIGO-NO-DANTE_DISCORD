@@ -177,21 +177,23 @@ export async function fetchRecentPosts(source: 'steam' | 'twitter', count = 3) {
   return results;
 }
 
-/** Gemini로 요약 후 메시지 빌드 */
+/** AI로 요약 후 메시지 빌드 */
 async function buildNotificationWithSummary(item: FeedItem, source: string) {
-  // 요약 시도
   if (item.description && item.description.length > 50) {
     const summary = await summarizeWithGemini(item.description);
     if (summary) {
-      return await buildNotificationMessage({ ...item, description: summary, contentImages: item.contentImages }, source);
+      return await buildNotificationMessage(
+        { ...item, description: summary.text, contentImages: item.contentImages },
+        source,
+        summary.model,
+      );
     }
   }
-  // 요약 실패 시 원본 사용
   return await buildNotificationMessage(item, source);
 }
 
 /** 알림 메시지 빌드 (배너 이미지 포함) */
-async function buildNotificationMessage(item: FeedItem, source: string) {
+async function buildNotificationMessage(item: FeedItem, source: string, aiModel?: string) {
   const container = new ContainerBuilder()
     .setAccentColor(source === 'steam' ? 0x1b2838 : 0x1da1f2);
 
@@ -248,26 +250,31 @@ async function buildNotificationMessage(item: FeedItem, source: string) {
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
   );
+  const footerParts = [dateStr, aiModel ? `${aiModel}로 요약됨` : '', '[saigo-no-dante.com](https://saigo-no-dante.com)'];
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`-# ${dateStr} · [saigo-no-dante.com](https://saigo-no-dante.com)`)
+    new TextDisplayBuilder().setContent(`-# ${footerParts.filter(Boolean).join(' · ')}`)
   );
 
+  // 버튼
+  const buttons = new ActionRowBuilder<MessageActionRowComponentBuilder>();
   if (item.link) {
-    const row = new ActionRowBuilder<MessageActionRowComponentBuilder>()
-      .addComponents(
-        new ButtonBuilder()
-          .setLabel('원문 보기')
-          .setURL(item.link)
-          .setStyle(ButtonStyle.Link)
-      );
-    container.addActionRowComponents(row);
+    buttons.addComponents(
+      new ButtonBuilder()
+        .setLabel('원문 보기')
+        .setURL(item.link)
+        .setStyle(ButtonStyle.Link)
+    );
+  }
+  if (buttons.components.length > 0) {
+    container.addActionRowComponents(buttons);
   }
 
   return { container, bannerFile };
 }
 
-// 실패한 길드 재시도 큐: { guildId → FeedItem[] }
-const retryQueue = new Map<string, { items: FeedItem[]; source: string }>();
+// 실패한 길드 재시도 큐
+type BuiltMessage = { container: ContainerBuilder; bannerFile: AttachmentBuilder | null };
+const retryQueue = new Map<string, BuiltMessage[]>();
 
 /** 새 피드 확인 & 알림 전송 */
 async function checkAndNotify(client: Client, source: string, items: FeedItem[]) {
@@ -295,17 +302,11 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
 
   console.log(`[Feed] ${source} 새 글 ${newItems.length}개 감지`);
 
-  // 요약은 한번만 생성 → 모든 서버에 재사용
-  const summarizedItems: FeedItem[] = [];
+  // 요약 + 메시지 빌드는 한번만 → 모든 서버에 재사용
+  const builtMessages: { container: ContainerBuilder; bannerFile: AttachmentBuilder | null }[] = [];
   for (const item of [...newItems].reverse()) {
-    if (item.description && item.description.length > 50) {
-      const summary = await summarizeWithGemini(item.description);
-      if (summary) {
-        summarizedItems.push({ ...item, description: summary });
-        continue;
-      }
-    }
-    summarizedItems.push(item);
+    const result = await buildNotificationWithSummary(item, source);
+    builtMessages.push(result);
   }
 
   // 알림 설정된 모든 길드에 전송
@@ -314,21 +315,20 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
 
   for (const guild of guilds) {
     if (guild[sourceField] === false) continue;
-    await sendToGuild(client, guild.guild_id, guild.notification_channel_id, summarizedItems, source);
+    await sendBuiltMessages(client, guild.guild_id, guild.notification_channel_id, builtMessages);
   }
 }
 
-/** 단일 길드에 전송 (실패 시 재시도 큐에 추가) */
-async function sendToGuild(client: Client, guildId: string, channelId: string, items: FeedItem[], source: string) {
+/** 빌드된 메시지를 길드에 전송 (실패 시 재시도 큐에 추가) */
+async function sendBuiltMessages(client: Client, guildId: string, channelId: string, messages: BuiltMessage[]) {
   try {
     const channel = await client.channels.fetch(channelId) as TextChannel | null;
     if (!channel?.isTextBased()) return;
 
-    for (const item of items) {
-      const result = await buildNotificationMessage(item, source);
+    for (const msg of messages) {
       await channel.send({
-        components: [result.container],
-        files: result.bannerFile ? [result.bannerFile] : [],
+        components: [msg.container],
+        files: msg.bannerFile ? [new AttachmentBuilder(msg.bannerFile.attachment as Buffer, { name: 'banner.png' })] : [],
         flags: MessageFlags.IsComponentsV2,
       });
     }
@@ -337,7 +337,7 @@ async function sendToGuild(client: Client, guildId: string, channelId: string, i
     retryQueue.delete(guildId);
   } catch (err) {
     console.error(`[Feed] 길드 ${guildId} 전송 실패, 재시도 큐에 추가:`, err);
-    retryQueue.set(guildId, { items, source });
+    retryQueue.set(guildId, messages);
   }
 }
 
@@ -350,13 +350,13 @@ async function processRetryQueue(client: Client) {
   const guilds = await getAllGuildsWithNotifications();
   const guildMap = new Map(guilds.map(g => [g.guild_id, g.notification_channel_id]));
 
-  for (const [guildId, { items, source }] of retryQueue) {
+  for (const [guildId, messages] of retryQueue) {
     const channelId = guildMap.get(guildId);
     if (!channelId) {
       retryQueue.delete(guildId);
       continue;
     }
-    await sendToGuild(client, guildId, channelId, items, source);
+    await sendBuiltMessages(client, guildId, channelId, messages);
   }
 }
 
