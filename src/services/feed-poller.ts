@@ -127,18 +127,28 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
     }
 
     const items = parseRssItems(xml);
-    return items.map(item => ({
-      ...item,
-      // Nitter 프록시 이미지 → 원본 URL
-      contentImages: item.contentImages.map(img =>
-        img.includes('/pic/') ? 'https://' + decodeURIComponent(img.split('/pic/')[1]) : img
-      ),
-      image: item.image?.includes('/pic/')
-        ? 'https://' + decodeURIComponent(item.image.split('/pic/')[1])
-        : item.image,
-      // 링크를 x.com으로
-      link: item.link.replace('https://nitter.net', 'https://x.com').replace('#m', ''),
-    }));
+    return items.map(item => {
+      // Nitter 프록시 이미지 → 원본 URL 변환
+      const fixImg = (url: string): string => {
+        if (!url) return '';
+        if (url.includes('/pic/')) {
+          try {
+            const decoded = decodeURIComponent(url.split('/pic/')[1]);
+            return decoded.startsWith('http') ? decoded : 'https://' + decoded;
+          } catch { return ''; }
+        }
+        return url;
+      };
+
+      const images = item.contentImages.map(fixImg).filter(u => u.startsWith('https://'));
+
+      return {
+        ...item,
+        contentImages: images,
+        image: item.image ? fixImg(item.image) || undefined : undefined,
+        link: item.link.replace('https://nitter.net', 'https://x.com').replace('#m', ''),
+      };
+    });
   } catch (err) {
     console.error('[Feed] Nitter 실패:', err);
     return [];
