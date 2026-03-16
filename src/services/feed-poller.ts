@@ -127,7 +127,13 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
     }
 
     const items = parseRssItems(xml);
-    return items.map(item => {
+    // Steam 링크가 있는 트윗은 Steam 내용으로 보강
+    const enrichedItems: FeedItem[] = [];
+    for (const item of items) {
+      enrichedItems.push(await enrichTwitterItem(item));
+    }
+
+    return enrichedItems.map(item => {
       // Nitter 프록시 이미지 → 원본 URL 변환
       const fixImg = (url: string): string => {
         if (!url) return '';
@@ -155,6 +161,40 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
     console.error('[Feed] Nitter 실패:', err);
     return [];
   }
+}
+
+/** Steam 공지 페이지에서 본문 가져오기 (curl) */
+async function fetchSteamNewsContent(url: string): Promise<string | null> {
+  try {
+    // Steam RSS에서 해당 글 찾기
+    const items = await fetchSteamFeed();
+    // URL에서 view ID 추출
+    const viewId = url.match(/\/view\/(\d+)/)?.[1];
+    if (!viewId) return null;
+
+    const matched = items.find(item => item.guid.includes(viewId) || item.link.includes(viewId));
+    if (matched) return matched.description;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 트위터 글에 Steam 링크가 있으면 Steam 내용으로 보강 */
+async function enrichTwitterItem(item: FeedItem): Promise<FeedItem> {
+  const steamUrlMatch = item.description.match(/https?:\/\/store\.steampowered\.com\/news\/app\/\d+\/view\/\d+/);
+  if (!steamUrlMatch) return item;
+
+  const steamContent = await fetchSteamNewsContent(steamUrlMatch[0]);
+  if (steamContent && steamContent.length > item.description.length) {
+    return {
+      ...item,
+      description: steamContent,
+      link: steamUrlMatch[0], // Steam 링크를 원문 링크로
+    };
+  }
+  return item;
 }
 
 /** 최신 Steam 글 1개를 가져와서 메시지로 빌드 (테스트용) */
