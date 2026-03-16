@@ -108,7 +108,8 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
   if (!token) return [];
 
   try {
-    const url = `https://api.x.com/2/users/${config.twitter.userId}/tweets?max_results=5&tweet.fields=created_at,text,attachments&expansions=attachments.media_keys&media.fields=url,preview_image_url`;
+    // Free 플랜은 Search만 가능 (User Timeline은 유료)
+    const url = `https://api.x.com/2/tweets/search/recent?query=from:LimbusCompany_B&max_results=10&tweet.fields=created_at,text,attachments&expansions=attachments.media_keys&media.fields=url,preview_image_url`;
 
     const res = await fetch(url, {
       headers: { 'Authorization': `Bearer ${token}` },
