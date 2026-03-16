@@ -102,60 +102,36 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
   }
 }
 
-/** Twitter API v2로 트윗 가져오기 */
+const NITTER_URL = 'https://nitter.net/LimbusCompany_B/rss';
+
+/** Twitter(Nitter) RSS 피드 가져오기 */
 async function fetchTwitterFeed(): Promise<FeedItem[]> {
-  const token = config.twitter.bearerToken;
-  if (!token) return [];
-
   try {
-    // Free 플랜은 Search만 가능 (User Timeline은 유료)
-    const url = `https://api.x.com/2/tweets/search/recent?query=from:LimbusCompany_B&max_results=10&tweet.fields=created_at,text,attachments&expansions=attachments.media_keys&media.fields=url,preview_image_url`;
-
-    const res = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${token}` },
+    const res = await fetch(NITTER_URL, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
     });
-
-    if (res.status === 429) {
-      console.warn('[Feed] Twitter API rate limit, 다음 폴링에서 재시도');
-      return [];
-    }
     if (!res.ok) {
-      console.error(`[Feed] Twitter API 에러: ${res.status}`);
+      console.error(`[Feed] Nitter 에러: ${res.status}`);
       return [];
     }
+    const xml = await res.text();
+    if (!xml.includes('<item>')) return [];
 
-    const data = await res.json() as any;
-    if (!data.data) return [];
-
-    // 미디어 매핑
-    const mediaMap = new Map<string, string>();
-    if (data.includes?.media) {
-      for (const m of data.includes.media) {
-        mediaMap.set(m.media_key, m.url ?? m.preview_image_url ?? '');
-      }
-    }
-
-    return data.data.map((tweet: any) => {
-      const images: string[] = [];
-      if (tweet.attachments?.media_keys) {
-        for (const key of tweet.attachments.media_keys) {
-          const url = mediaMap.get(key);
-          if (url) images.push(url);
-        }
-      }
-
-      return {
-        title: tweet.text.split('\n')[0].slice(0, 100),
-        link: `https://x.com/LimbusCompany_B/status/${tweet.id}`,
-        description: tweet.text,
-        pubDate: tweet.created_at ?? '',
-        guid: tweet.id,
-        image: images[0],
-        contentImages: images.slice(0, 4),
-      } as FeedItem;
-    });
+    const items = parseRssItems(xml);
+    return items.map(item => ({
+      ...item,
+      // Nitter 프록시 이미지 → 원본 URL
+      contentImages: item.contentImages.map(img =>
+        img.includes('/pic/') ? 'https://' + decodeURIComponent(img.split('/pic/')[1]) : img
+      ),
+      image: item.image?.includes('/pic/')
+        ? 'https://' + decodeURIComponent(item.image.split('/pic/')[1])
+        : item.image,
+      // 링크를 x.com으로
+      link: item.link.replace('https://nitter.net', 'https://x.com').replace('#m', ''),
+    }));
   } catch (err) {
-    console.error('[Feed] Twitter API 실패:', err);
+    console.error('[Feed] Nitter 실패:', err);
     return [];
   }
 }
@@ -389,10 +365,7 @@ export function startFeedPoller(client: Client) {
     pollSteam();
     setInterval(pollSteam, POLL_INTERVAL);
 
-    // Twitter: API 크레딧 있을 때만 활성화
-    if (config.twitter.bearerToken) {
-      pollTwitter();
-      setInterval(pollTwitter, TWITTER_POLL_INTERVAL);
-    }
+    pollTwitter();
+    setInterval(pollTwitter, TWITTER_POLL_INTERVAL);
   }, 30_000);
 }
