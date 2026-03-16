@@ -193,7 +193,7 @@ async function enrichTwitterItem(item: FeedItem): Promise<FeedItem> {
     return {
       ...item,
       description: steamContent,
-      link: steamUrlMatch[0], // Steam 링크를 원문 링크로
+      // link는 원래 트위터 링크 유지
     };
   }
   return item;
