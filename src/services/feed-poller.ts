@@ -374,8 +374,12 @@ export function startFeedPoller(client: Client) {
   // 시작 후 30초 대기 후 첫 폴링
   setTimeout(() => {
     pollSteam();
-    pollTwitter();
     setInterval(pollSteam, POLL_INTERVAL);
-    setInterval(pollTwitter, TWITTER_POLL_INTERVAL);
+
+    // Twitter: API 크레딧 있을 때만 활성화
+    if (config.twitter.bearerToken) {
+      pollTwitter();
+      setInterval(pollTwitter, TWITTER_POLL_INTERVAL);
+    }
   }, 30_000);
 }
