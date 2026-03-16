@@ -134,7 +134,9 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
         if (url.includes('/pic/')) {
           try {
             const decoded = decodeURIComponent(url.split('/pic/')[1]);
-            return decoded.startsWith('http') ? decoded : 'https://' + decoded;
+            if (decoded.startsWith('http')) return decoded;
+            // pbs.twimg.com 이미지 (card_img, media, profile_images 등)
+            return 'https://pbs.twimg.com/' + decoded;
           } catch { return ''; }
         }
         return url;
