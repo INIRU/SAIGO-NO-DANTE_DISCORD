@@ -2,15 +2,13 @@ import { type Client, ContainerBuilder, TextDisplayBuilder, FileBuilder, MediaGa
 import { generateBanner } from './banner.js';
 import { getAllGuildsWithNotifications, getFeedTracker, updateFeedTracker } from '../db/guild-settings.js';
 import { summarizeWithGemini } from './gemini.js';
+import { config } from '../config.js';
 
 
 const STEAM_APP_ID = '1973530';
 const STEAM_RSS_URL = `https://store.steampowered.com/feeds/news/app/${STEAM_APP_ID}/?l=koreana`;
-const NITTER_INSTANCES = [
-  'https://nitter.poast.org',
-];
-const TWITTER_USER = 'LimbusCompany_B';
-const POLL_INTERVAL = 5 * 60 * 1000; // 5분
+const POLL_INTERVAL = 5 * 60 * 1000; // 5분 (Steam)
+const TWITTER_POLL_INTERVAL = 30 * 60 * 1000; // 30분 (Twitter)
 
 interface FeedItem {
   title: string;
@@ -104,36 +102,61 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
   }
 }
 
-/** Twitter(Nitter) RSS 피드 가져오기 */
+/** Twitter API v2로 트윗 가져오기 */
 async function fetchTwitterFeed(): Promise<FeedItem[]> {
-  for (const instance of NITTER_INSTANCES) {
-    try {
-      const url = `${instance}/${TWITTER_USER}/rss`;
-      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (!res.ok) continue;
-      const xml = await res.text();
-      if (xml.includes('<item>')) {
-        const items = parseRssItems(xml);
-        // Nitter 이미지 URL을 원본 트위터 URL로 변환
-        return items.map(item => ({
-          ...item,
-          // nitter 프록시 이미지 → 원본 pbs.twimg.com
-          contentImages: item.contentImages.map(img =>
-            img.includes('/pic/') ? 'https://' + decodeURIComponent(img.split('/pic/')[1]) : img
-          ),
-          image: item.image?.includes('/pic/')
-            ? 'https://' + decodeURIComponent(item.image.split('/pic/')[1])
-            : item.image,
-          // 링크를 실제 트위터 URL로
-          link: item.link.replace(instance, 'https://x.com'),
-        }));
-      }
-    } catch (err) {
-      console.error(`[Feed] Nitter ${instance} 실패:`, err);
+  const token = config.twitter.bearerToken;
+  if (!token) return [];
+
+  try {
+    const url = `https://api.x.com/2/users/${config.twitter.userId}/tweets?max_results=5&tweet.fields=created_at,text,attachments&expansions=attachments.media_keys&media.fields=url,preview_image_url`;
+
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    if (res.status === 429) {
+      console.warn('[Feed] Twitter API rate limit, 다음 폴링에서 재시도');
+      return [];
     }
+    if (!res.ok) {
+      console.error(`[Feed] Twitter API 에러: ${res.status}`);
+      return [];
+    }
+
+    const data = await res.json() as any;
+    if (!data.data) return [];
+
+    // 미디어 매핑
+    const mediaMap = new Map<string, string>();
+    if (data.includes?.media) {
+      for (const m of data.includes.media) {
+        mediaMap.set(m.media_key, m.url ?? m.preview_image_url ?? '');
+      }
+    }
+
+    return data.data.map((tweet: any) => {
+      const images: string[] = [];
+      if (tweet.attachments?.media_keys) {
+        for (const key of tweet.attachments.media_keys) {
+          const url = mediaMap.get(key);
+          if (url) images.push(url);
+        }
+      }
+
+      return {
+        title: tweet.text.split('\n')[0].slice(0, 100),
+        link: `https://x.com/LimbusCompany_B/status/${tweet.id}`,
+        description: tweet.text,
+        pubDate: tweet.created_at ?? '',
+        guid: tweet.id,
+        image: images[0],
+        contentImages: images.slice(0, 4),
+      } as FeedItem;
+    });
+  } catch (err) {
+    console.error('[Feed] Twitter API 실패:', err);
+    return [];
   }
-  console.warn('[Feed] 모든 Nitter 인스턴스 실패');
-  return [];
 }
 
 /** 최신 Steam 글 1개를 가져와서 메시지로 빌드 (테스트용) */
@@ -325,30 +348,33 @@ async function processRetryQueue(client: Client) {
 
 /** 피드 폴링 시작 */
 export function startFeedPoller(client: Client) {
-  console.log('[Feed] 피드 폴링 시작 (5분 간격)');
+  console.log('[Feed] Steam 폴링 5분 / Twitter 폴링 30분 간격');
 
-  const poll = async () => {
+  const pollSteam = async () => {
     try {
       const steamItems = await fetchSteamFeed();
       await checkAndNotify(client, 'steam', steamItems);
-
-      // Twitter: Nitter 인스턴스 접근 가능할 때만 시도
-      try {
-        const twitterItems = await fetchTwitterFeed();
-        if (twitterItems.length > 0) {
-          await checkAndNotify(client, 'twitter', twitterItems);
-        }
-      } catch {
-        // Nitter 차단 시 조용히 스킵
-      }
     } catch (err) {
-      console.error('[Feed] 폴링 에러:', err);
+      console.error('[Feed] Steam 폴링 에러:', err);
     }
   };
 
-  // 시작 후 30초 대기 후 첫 폴링 (봇 준비 시간)
+  const pollTwitter = async () => {
+    try {
+      const twitterItems = await fetchTwitterFeed();
+      if (twitterItems.length > 0) {
+        await checkAndNotify(client, 'twitter', twitterItems);
+      }
+    } catch (err) {
+      console.error('[Feed] Twitter 폴링 에러:', err);
+    }
+  };
+
+  // 시작 후 30초 대기 후 첫 폴링
   setTimeout(() => {
-    poll();
-    setInterval(poll, POLL_INTERVAL);
+    pollSteam();
+    pollTwitter();
+    setInterval(pollSteam, POLL_INTERVAL);
+    setInterval(pollTwitter, TWITTER_POLL_INTERVAL);
   }, 30_000);
 }

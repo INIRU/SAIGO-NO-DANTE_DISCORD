@@ -27,4 +27,8 @@ export const config = {
   gemini: {
     apiKeys: (process.env.GEMINI_API_KEYS ?? '').split(',').filter(Boolean),
   },
+  twitter: {
+    bearerToken: process.env.TWITTER_BEARER_TOKEN ?? '',
+    userId: '1509485437785894912', // @LimbusCompany_B
+  },
 } as const;
