@@ -295,13 +295,26 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
 
   console.log(`[Feed] ${source} 새 글 ${newItems.length}개 감지`);
 
+  // 요약은 한번만 생성 → 모든 서버에 재사용
+  const summarizedItems: FeedItem[] = [];
+  for (const item of [...newItems].reverse()) {
+    if (item.description && item.description.length > 50) {
+      const summary = await summarizeWithGemini(item.description);
+      if (summary) {
+        summarizedItems.push({ ...item, description: summary });
+        continue;
+      }
+    }
+    summarizedItems.push(item);
+  }
+
   // 알림 설정된 모든 길드에 전송
   const guilds = await getAllGuildsWithNotifications();
   const sourceField = source === 'steam' ? 'steam_enabled' : 'twitter_enabled';
 
   for (const guild of guilds) {
     if (guild[sourceField] === false) continue;
-    await sendToGuild(client, guild.guild_id, guild.notification_channel_id, newItems, source);
+    await sendToGuild(client, guild.guild_id, guild.notification_channel_id, summarizedItems, source);
   }
 }
 
@@ -311,8 +324,8 @@ async function sendToGuild(client: Client, guildId: string, channelId: string, i
     const channel = await client.channels.fetch(channelId) as TextChannel | null;
     if (!channel?.isTextBased()) return;
 
-    for (const item of [...items].reverse()) {
-      const result = await buildNotificationWithSummary(item, source);
+    for (const item of items) {
+      const result = await buildNotificationMessage(item, source);
       await channel.send({
         components: [result.container],
         files: result.bannerFile ? [result.bannerFile] : [],
