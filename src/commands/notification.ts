@@ -11,7 +11,7 @@ import {
 } from 'discord.js';
 import { SITE_COLORS } from '../constants/colors.js';
 import { getGuildSettings, setNotificationChannel, toggleSource } from '../db/guild-settings.js';
-import { fetchLatestSteamPost } from '../services/feed-poller.js';
+import { fetchLatestSteamPost, fetchRecentSteamPosts } from '../services/feed-poller.js';
 
 export const data = new SlashCommandBuilder()
   .setName('알림설정')
@@ -34,6 +34,16 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(sub =>
     sub.setName('테스트')
       .setDescription('최신 Steam 공지를 미리봅니다 (관리자 전용)')
+  )
+  .addSubcommand(sub =>
+    sub.setName('최근')
+      .setDescription('최근 Steam 공지를 전송합니다')
+      .addIntegerOption(opt =>
+        opt.setName('개수')
+          .setDescription('가져올 글 수 (기본 3)')
+          .setMinValue(1)
+          .setMaxValue(5)
+      )
   )
   .addSubcommand(sub =>
     sub.setName('토글')
@@ -127,6 +137,34 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         });
       } else {
         await interaction.editReply({ content: 'Steam 피드를 가져올 수 없습니다.' });
+      }
+      break;
+    }
+
+    case '최근': {
+      const count = interaction.options.getInteger('개수') ?? 3;
+      await interaction.deferReply();
+
+      const results = await fetchRecentSteamPosts(count);
+      if (results.length === 0) {
+        await interaction.editReply({ content: 'Steam 피드를 가져올 수 없습니다.' });
+        break;
+      }
+
+      await interaction.editReply({
+        components: [results[0].container],
+        files: results[0].bannerFile ? [results[0].bannerFile] : [],
+        flags: MessageFlags.IsComponentsV2,
+      });
+
+      // 나머지는 후속 메시지로
+      for (let i = 1; i < results.length; i++) {
+        const files = results[i].bannerFile ? [results[i].bannerFile] : [];
+        await interaction.followUp({
+          components: [results[i].container],
+          files: files as any[],
+          flags: MessageFlags.IsComponentsV2,
+        });
       }
       break;
     }

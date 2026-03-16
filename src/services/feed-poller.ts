@@ -107,6 +107,16 @@ export async function fetchLatestSteamPost() {
   return buildNotificationWithSummary(items[0], 'steam');
 }
 
+/** 최근 N개 Steam 글을 가져와서 메시지로 빌드 */
+export async function fetchRecentSteamPosts(count = 3) {
+  const items = await fetchSteamFeed();
+  const results = [];
+  for (const item of items.slice(0, count)) {
+    results.push(await buildNotificationWithSummary(item, 'steam'));
+  }
+  return results;
+}
+
 /** Gemini로 요약 후 메시지 빌드 */
 async function buildNotificationWithSummary(item: FeedItem, source: string) {
   // 요약 시도
