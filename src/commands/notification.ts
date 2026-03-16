@@ -8,10 +8,11 @@ import {
   SeparatorBuilder,
   SeparatorSpacingSize,
   type ChatInputCommandInteraction,
+  type TextChannel,
 } from 'discord.js';
 import { SITE_COLORS } from '../constants/colors.js';
 import { getGuildSettings, setNotificationChannel, toggleSource } from '../db/guild-settings.js';
-import { fetchLatestSteamPost, fetchRecentSteamPosts } from '../services/feed-poller.js';
+import { fetchLatestSteamPost, fetchRecentPosts } from '../services/feed-poller.js';
 
 export const data = new SlashCommandBuilder()
   .setName('알림설정')
@@ -37,7 +38,16 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand(sub =>
     sub.setName('최근')
-      .setDescription('최근 Steam 공지를 전송합니다')
+      .setDescription('최근 공지를 전송합니다')
+      .addStringOption(opt =>
+        opt.setName('소스')
+          .setDescription('알림 소스')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Steam 공지', value: 'steam' },
+            { name: 'X(Twitter)', value: 'twitter' },
+          )
+      )
       .addIntegerOption(opt =>
         opt.setName('개수')
           .setDescription('가져올 글 수 (기본 3)')
@@ -136,36 +146,46 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           flags: MessageFlags.IsComponentsV2,
         });
       } else {
-        await interaction.editReply({ content: 'Steam 피드를 가져올 수 없습니다.' });
+        await interaction.editReply({ content: '피드를 가져올 수 없습니다.' });
       }
       break;
     }
 
     case '최근': {
+      const source = interaction.options.getString('소스', true) as 'steam' | 'twitter';
       const count = interaction.options.getInteger('개수') ?? 3;
-      await interaction.deferReply();
 
-      const results = await fetchRecentSteamPosts(count);
-      if (results.length === 0) {
-        await interaction.editReply({ content: 'Steam 피드를 가져올 수 없습니다.' });
+      // 설정된 알림 채널로 전송
+      const recentSettings = await getGuildSettings(guildId);
+      if (!recentSettings?.notification_channel_id) {
+        await interaction.reply({ content: '알림 채널이 설정되지 않았습니다. `/알림설정 채널`로 먼저 설정해주세요.', ephemeral: true });
         break;
       }
 
-      await interaction.editReply({
-        components: [results[0].container],
-        files: results[0].bannerFile ? [results[0].bannerFile] : [],
-        flags: MessageFlags.IsComponentsV2,
-      });
+      await interaction.deferReply({ ephemeral: true });
 
-      // 나머지는 후속 메시지로
-      for (let i = 1; i < results.length; i++) {
-        const files = results[i].bannerFile ? [results[i].bannerFile] : [];
-        await interaction.followUp({
-          components: [results[i].container],
-          files: files as any[],
+      const targetChannel = await interaction.client.channels.fetch(recentSettings.notification_channel_id) as TextChannel | null;
+      if (!targetChannel?.isTextBased()) {
+        await interaction.editReply({ content: '알림 채널에 접근할 수 없습니다.' });
+        break;
+      }
+
+      const results = await fetchRecentPosts(source, count);
+      if (results.length === 0) {
+        await interaction.editReply({ content: '피드를 가져올 수 없습니다.' });
+        break;
+      }
+
+      for (const result of results.reverse()) {
+        await targetChannel.send({
+          components: [result.container],
+          files: result.bannerFile ? [result.bannerFile] : [],
           flags: MessageFlags.IsComponentsV2,
         });
       }
+
+      const sourceLabel = source === 'steam' ? 'Steam' : 'X(Twitter)';
+      await interaction.editReply({ content: `${sourceLabel} 최근 ${results.length}개 글을 <#${recentSettings.notification_channel_id}>에 전송했습니다.` });
       break;
     }
 

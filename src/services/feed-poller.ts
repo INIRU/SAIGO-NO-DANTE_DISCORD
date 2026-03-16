@@ -143,12 +143,12 @@ export async function fetchLatestSteamPost() {
   return buildNotificationWithSummary(items[0], 'steam');
 }
 
-/** 최근 N개 Steam 글을 가져와서 메시지로 빌드 */
-export async function fetchRecentSteamPosts(count = 3) {
-  const items = await fetchSteamFeed();
+/** 최근 N개 글을 가져와서 메시지로 빌드 */
+export async function fetchRecentPosts(source: 'steam' | 'twitter', count = 3) {
+  const items = source === 'steam' ? await fetchSteamFeed() : await fetchTwitterFeed();
   const results = [];
   for (const item of items.slice(0, count)) {
-    results.push(await buildNotificationWithSummary(item, 'steam'));
+    results.push(await buildNotificationWithSummary(item, source));
   }
   return results;
 }

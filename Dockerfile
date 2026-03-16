@@ -8,6 +8,8 @@ RUN npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
+# 한글 폰트 설치 (배너 이미지용)
+RUN apk add --no-cache fontconfig font-noto font-noto-cjk
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
