@@ -6,6 +6,10 @@ import { summarizeWithGemini } from './gemini.js';
 
 const STEAM_APP_ID = '1973530';
 const STEAM_RSS_URL = `https://store.steampowered.com/feeds/news/app/${STEAM_APP_ID}/?l=koreana`;
+const NITTER_INSTANCES = [
+  'https://nitter.poast.org',
+];
+const TWITTER_USER = 'LimbusCompany_B';
 const POLL_INTERVAL = 5 * 60 * 1000; // 5분
 
 interface FeedItem {
@@ -98,6 +102,38 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
     console.error('[Feed] Steam RSS 가져오기 실패:', err);
     return [];
   }
+}
+
+/** Twitter(Nitter) RSS 피드 가져오기 */
+async function fetchTwitterFeed(): Promise<FeedItem[]> {
+  for (const instance of NITTER_INSTANCES) {
+    try {
+      const url = `${instance}/${TWITTER_USER}/rss`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!res.ok) continue;
+      const xml = await res.text();
+      if (xml.includes('<item>')) {
+        const items = parseRssItems(xml);
+        // Nitter 이미지 URL을 원본 트위터 URL로 변환
+        return items.map(item => ({
+          ...item,
+          // nitter 프록시 이미지 → 원본 pbs.twimg.com
+          contentImages: item.contentImages.map(img =>
+            img.includes('/pic/') ? 'https://' + decodeURIComponent(img.split('/pic/')[1]) : img
+          ),
+          image: item.image?.includes('/pic/')
+            ? 'https://' + decodeURIComponent(item.image.split('/pic/')[1])
+            : item.image,
+          // 링크를 실제 트위터 URL로
+          link: item.link.replace(instance, 'https://x.com'),
+        }));
+      }
+    } catch (err) {
+      console.error(`[Feed] Nitter ${instance} 실패:`, err);
+    }
+  }
+  console.warn('[Feed] 모든 Nitter 인스턴스 실패');
+  return [];
 }
 
 /** 최신 Steam 글 1개를 가져와서 메시지로 빌드 (테스트용) */
@@ -295,6 +331,9 @@ export function startFeedPoller(client: Client) {
     try {
       const steamItems = await fetchSteamFeed();
       await checkAndNotify(client, 'steam', steamItems);
+
+      const twitterItems = await fetchTwitterFeed();
+      await checkAndNotify(client, 'twitter', twitterItems);
     } catch (err) {
       console.error('[Feed] 폴링 에러:', err);
     }
