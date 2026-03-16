@@ -1,5 +1,6 @@
 import { type Client, ContainerBuilder, TextDisplayBuilder, FileBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, type MessageActionRowComponentBuilder, MessageFlags, AttachmentBuilder, type TextChannel } from 'discord.js';
 import { generateBanner } from './banner.js';
+import sharp from 'sharp';
 import { getAllGuildsWithNotifications, getFeedTracker, updateFeedTracker } from '../db/guild-settings.js';
 import { summarizeWithGemini } from './gemini.js';
 import { config } from '../config.js';
@@ -8,7 +9,7 @@ import { config } from '../config.js';
 const STEAM_APP_ID = '1973530';
 const STEAM_RSS_URL = `https://store.steampowered.com/feeds/news/app/${STEAM_APP_ID}/?l=koreana`;
 const POLL_INTERVAL = 5 * 60 * 1000; // 5분 (Steam)
-const TWITTER_POLL_INTERVAL = 30 * 60 * 1000; // 30분 (Twitter)
+const TWITTER_POLL_INTERVAL = 5 * 60 * 1000; // 5분 (Twitter)
 
 interface FeedItem {
   title: string;
@@ -163,6 +164,29 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
   }
 }
 
+/** 이미지 다운로드 후 밝기 올리기 (어두운 티저용) */
+async function brightenImage(imageUrl: string): Promise<Buffer | null> {
+  try {
+    const { execSync } = await import('child_process');
+    const imgData = execSync(`curl -sL --max-time 10 "${imageUrl}"`, { maxBuffer: 10 * 1024 * 1024 });
+    if (imgData.length === 0) return null;
+
+    return await sharp(imgData)
+      .modulate({ brightness: 6 })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+  } catch (err) {
+    console.error('[Feed] 이미지 밝기 처리 실패:', err);
+    return null;
+  }
+}
+
+/** 태그만 있는 트윗인지 판별 (티저 이미지 트윗) */
+function isTeaserTweet(item: FeedItem): boolean {
+  const textOnly = item.title.replace(/#\S+/g, '').replace(/\s+/g, '').trim();
+  return textOnly.length < 10 && item.contentImages.length > 0;
+}
+
 /** Steam 공지 페이지에서 본문 가져오기 (curl) */
 async function fetchSteamNewsContent(url: string): Promise<string | null> {
   try {
@@ -270,11 +294,46 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
     );
   }
 
-  // 본문 내 이미지 (MediaGallery) — 유효한 URL만
+  // 티저 트윗이면 밝기 올린 이미지를 스포일러로 첨부
+  const extraFiles: AttachmentBuilder[] = [];
+  const isTeaser = isTeaserTweet(item);
+
+  if (isTeaser && item.contentImages.length > 0) {
+    container.addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    );
+
+    // 원본 이미지 (스포일러 X)
+    const originalGallery = new MediaGalleryBuilder()
+      .addItems(...item.contentImages.map(url =>
+        new MediaGalleryItemBuilder().setURL(url)
+      ));
+    container.addMediaGalleryComponents(originalGallery);
+
+    // 밝기 6배 이미지 (스포일러 O)
+    for (let i = 0; i < item.contentImages.length; i++) {
+      const brightened = await brightenImage(item.contentImages[i]);
+      if (brightened) {
+        extraFiles.push(new AttachmentBuilder(brightened, { name: `SPOILER_bright_${i}.jpg` }));
+      }
+    }
+    if (extraFiles.length > 0) {
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent('-# 🔍 밝기 보정 (스포일러 주의)')
+      );
+      const brightGallery = new MediaGalleryBuilder()
+        .addItems(...extraFiles.map((_, i) =>
+          new MediaGalleryItemBuilder().setURL(`attachment://SPOILER_bright_${i}.jpg`).setSpoiler(true)
+        ));
+      container.addMediaGalleryComponents(brightGallery);
+    }
+  }
+
+  // 본문 내 이미지 (MediaGallery) — 유효한 URL만 (티저가 아닐 때만)
   const validImages = (item.contentImages ?? []).filter(url =>
     url.startsWith('https://') && !url.includes('placeholder')
   );
-  if (validImages.length > 0) {
+  if (!isTeaser && validImages.length > 0) {
     container.addSeparatorComponents(
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
@@ -308,11 +367,12 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
     container.addActionRowComponents(buttons);
   }
 
-  return { container, bannerFile };
+  const allFiles = [bannerFile, ...extraFiles].filter(Boolean) as AttachmentBuilder[];
+  return { container, bannerFile, extraFiles: allFiles };
 }
 
 // 실패한 길드 재시도 큐
-type BuiltMessage = { container: ContainerBuilder; bannerFile: AttachmentBuilder | null };
+type BuiltMessage = { container: ContainerBuilder; bannerFile: AttachmentBuilder | null; extraFiles: AttachmentBuilder[] };
 const retryQueue = new Map<string, BuiltMessage[]>();
 
 /** 새 피드 확인 & 알림 전송 */
@@ -342,7 +402,7 @@ async function checkAndNotify(client: Client, source: string, items: FeedItem[])
   console.log(`[Feed] ${source} 새 글 ${newItems.length}개 감지`);
 
   // 요약 + 메시지 빌드는 한번만 → 모든 서버에 재사용
-  const builtMessages: { container: ContainerBuilder; bannerFile: AttachmentBuilder | null }[] = [];
+  const builtMessages: { container: ContainerBuilder; bannerFile: AttachmentBuilder | null; extraFiles: AttachmentBuilder[] }[] = [];
   for (const item of [...newItems].reverse()) {
     const result = await buildNotificationWithSummary(item, source);
     builtMessages.push(result);
@@ -367,7 +427,10 @@ async function sendBuiltMessages(client: Client, guildId: string, channelId: str
     for (const msg of messages) {
       await channel.send({
         components: [msg.container],
-        files: msg.bannerFile ? [new AttachmentBuilder(msg.bannerFile.attachment as Buffer, { name: 'banner.png' })] : [],
+        files: [
+          ...(msg.bannerFile ? [new AttachmentBuilder(msg.bannerFile.attachment as Buffer, { name: 'banner.png' })] : []),
+          ...msg.extraFiles.map((f, i) => new AttachmentBuilder(f.attachment as Buffer, { name: `SPOILER_bright_${i}.jpg` })),
+        ],
         flags: MessageFlags.IsComponentsV2,
       });
     }

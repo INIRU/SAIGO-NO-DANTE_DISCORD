@@ -142,7 +142,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       if (result) {
         await interaction.editReply({
           components: [result.container],
-          files: result.bannerFile ? [result.bannerFile] : [],
+          files: result.extraFiles ?? (result.bannerFile ? [result.bannerFile] : []),
           flags: MessageFlags.IsComponentsV2,
         });
       } else {
@@ -179,7 +179,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       for (const result of results.reverse()) {
         await targetChannel.send({
           components: [result.container],
-          files: result.bannerFile ? [result.bannerFile] : [],
+          files: result.extraFiles ?? (result.bannerFile ? [result.bannerFile] : []),
           flags: MessageFlags.IsComponentsV2,
         });
       }
