@@ -332,8 +332,15 @@ export function startFeedPoller(client: Client) {
       const steamItems = await fetchSteamFeed();
       await checkAndNotify(client, 'steam', steamItems);
 
-      const twitterItems = await fetchTwitterFeed();
-      await checkAndNotify(client, 'twitter', twitterItems);
+      // Twitter: Nitter 인스턴스 접근 가능할 때만 시도
+      try {
+        const twitterItems = await fetchTwitterFeed();
+        if (twitterItems.length > 0) {
+          await checkAndNotify(client, 'twitter', twitterItems);
+        }
+      } catch {
+        // Nitter 차단 시 조용히 스킵
+      }
     } catch (err) {
       console.error('[Feed] 폴링 에러:', err);
     }
