@@ -52,7 +52,7 @@ export const data = new SlashCommandBuilder()
         opt.setName('개수')
           .setDescription('가져올 글 수 (기본 3)')
           .setMinValue(1)
-          .setMaxValue(5)
+          .setMaxValue(20)
       )
   )
   .addSubcommand(sub =>
