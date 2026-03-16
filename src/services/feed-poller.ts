@@ -183,7 +183,9 @@ async function fetchSteamNewsContent(url: string): Promise<string | null> {
 
 /** 트위터 글에 Steam 링크가 있으면 Steam 내용으로 보강 */
 async function enrichTwitterItem(item: FeedItem): Promise<FeedItem> {
-  const steamUrlMatch = item.description.match(/https?:\/\/store\.steampowered\.com\/news\/app\/\d+\/view\/\d+/);
+  // title과 description 모두에서 Steam URL 검색
+  const fullText = `${item.title} ${item.description}`;
+  const steamUrlMatch = fullText.match(/https?:\/\/store\.steampowered\.com\/news\/app\/\d+\/view\/\d+/);
   if (!steamUrlMatch) return item;
 
   const steamContent = await fetchSteamNewsContent(steamUrlMatch[0]);
