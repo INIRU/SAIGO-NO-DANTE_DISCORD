@@ -104,18 +104,27 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
 
 const NITTER_URL = 'https://nitter.net/LimbusCompany_B/rss';
 
+/** curl로 RSS 가져오기 (Node fetch가 빈 응답 반환하는 문제 우회) */
+async function fetchWithCurl(url: string): Promise<string> {
+  const { execSync } = await import('child_process');
+  try {
+    return execSync(`curl -sL --max-time 15 "${url}" -H "User-Agent: Mozilla/5.0"`, {
+      encoding: 'utf-8',
+      timeout: 20000,
+    });
+  } catch {
+    return '';
+  }
+}
+
 /** Twitter(Nitter) RSS 피드 가져오기 */
 async function fetchTwitterFeed(): Promise<FeedItem[]> {
   try {
-    const res = await fetch(NITTER_URL, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
-    if (!res.ok) {
-      console.error(`[Feed] Nitter 에러: ${res.status}`);
+    const xml = await fetchWithCurl(NITTER_URL);
+    if (!xml || !xml.includes('<item>')) {
+      console.warn('[Feed] Nitter RSS 비어있음');
       return [];
     }
-    const xml = await res.text();
-    if (!xml.includes('<item>')) return [];
 
     const items = parseRssItems(xml);
     return items.map(item => ({
