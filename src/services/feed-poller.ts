@@ -297,20 +297,23 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
   // 소스 라벨 + 제목 (태그 분리)
   const sourceLabel = source === 'steam' ? '🎮 [Steam] Limbus Company 소식' : '🐦 [X] Limbus Company 소식';
   const tags = item.title.match(/#\S+/g) ?? [];
-  const titleWithoutTags = item.title
+  const urls = item.title.match(/https?:\/\/\S+/g) ?? [];
+  const titleWithoutExtras = item.title
     .replace(/#\S+/g, '')
     .replace(/https?:\/\/\S+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const titleDisplay = titleWithoutTags || item.title;
+  const titleDisplay = titleWithoutExtras || item.title;
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(`## ${sourceLabel}\n# ${titleDisplay}`)
   );
 
-  if (tags.length > 0) {
+  // 태그 + URL을 작은 글씨로
+  const subInfo = [...(tags.length > 0 ? [tags.join(' ')] : []), ...urls.map(u => `[링크](${u})`)];
+  if (subInfo.length > 0) {
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`-# ${tags.join(' ')}`)
+      new TextDisplayBuilder().setContent(`-# ${subInfo.join(' · ')}`)
     );
   }
 
