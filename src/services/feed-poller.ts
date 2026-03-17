@@ -256,8 +256,9 @@ async function buildNotificationWithSummary(item: FeedItem, source: string) {
     return await buildNotificationMessage(item, source);
   }
 
-  // 본문이 충분히 길 때만 요약
-  if (item.description && item.description.length > 100) {
+  // 본문이 충분히 길고 의미있는 텍스트가 있을 때만 요약
+  const textWithoutTags = (item.description ?? '').replace(/#\S+/g, '').replace(/https?:\/\/\S+/g, '').trim();
+  if (textWithoutTags.length > 100) {
     const summary = await summarizeWithGemini(item.description);
     if (summary) {
       return await buildNotificationMessage(
