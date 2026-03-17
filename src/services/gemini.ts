@@ -7,7 +7,7 @@ const API_URL = 'https://api.iniru.net/v1/chat/completions';
 const API_KEY = 'sk-ZAlsN1boKEjWANntgEisGes8L01mr15NymrCgDqHO0qML';
 const MODEL = 'gpt-5.4';
 
-const SYSTEM_PROMPT = `림버스 컴퍼니 공지를 3~5줄로 요약. 규칙: 핵심만 간결하게. 반복 금지. 없는 정보 추측 금지. 보상은 한 줄로. 이모지 소제목 1~2개. 수평선(---) 금지. 날짜는 원본 그대로 짧게. 한국어.`;
+const SYSTEM_PROMPT = `림버스 컴퍼니 공지를 3~5줄로 요약. 규칙: 핵심만 간결하게. 반복 금지. 본문에 없는 정보는 절대 쓰지 마. 보상이 본문에 있을 때만 한 줄로 써. 없으면 보상 언급 자체를 하지 마. "확인 불가" 같은 말 쓰지 마. 이모지 소제목 1~2개. 수평선(---) 금지. 날짜는 원본 그대로 짧게. 한국어.`;
 
 /**
  * AI로 텍스트 요약

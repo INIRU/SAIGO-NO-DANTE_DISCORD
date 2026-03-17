@@ -184,7 +184,7 @@ async function brightenImage(imageUrl: string): Promise<Buffer | null> {
 /** 태그만 있는 트윗인지 판별 (티저 이미지 트윗) */
 function isTeaserTweet(item: FeedItem): boolean {
   // RT(리트윗)는 티저가 아님
-  if (item.title.startsWith('RT @') || item.description.startsWith('RT @')) return false;
+  if (item.title.includes('RT') || item.description.includes('RT')) return false;
   // URL이 포함되어 있으면 티저가 아님 (Steam 링크 등)
   if (item.title.includes('http') || item.description.includes('http')) return false;
   // 태그+이모지 제거 후 텍스트가 거의 없으면 티저
@@ -297,7 +297,11 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
   // 소스 라벨 + 제목 (태그 분리)
   const sourceLabel = source === 'steam' ? '🎮 [Steam] Limbus Company 소식' : '🐦 [X] Limbus Company 소식';
   const tags = item.title.match(/#\S+/g) ?? [];
-  const titleWithoutTags = item.title.replace(/#\S+/g, '').replace(/\s+/g, ' ').trim();
+  const titleWithoutTags = item.title
+    .replace(/#\S+/g, '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   const titleDisplay = titleWithoutTags || item.title;
 
   container.addTextDisplayComponents(
