@@ -183,8 +183,17 @@ async function brightenImage(imageUrl: string): Promise<Buffer | null> {
 
 /** 태그만 있는 트윗인지 판별 (티저 이미지 트윗) */
 function isTeaserTweet(item: FeedItem): boolean {
-  const textOnly = item.title.replace(/#\S+/g, '').replace(/\s+/g, '').trim();
-  return textOnly.length < 10 && item.contentImages.length > 0;
+  // RT(리트윗)는 티저가 아님
+  if (item.title.startsWith('RT @') || item.description.startsWith('RT @')) return false;
+  // URL이 포함되어 있으면 티저가 아님 (Steam 링크 등)
+  if (item.title.includes('http') || item.description.includes('http')) return false;
+  // 태그+이모지 제거 후 텍스트가 거의 없으면 티저
+  const textOnly = item.title
+    .replace(/#\S+/g, '')        // 해시태그 제거
+    .replace(/[\u{1F000}-\u{1FFFF}]/gu, '') // 이모지 제거
+    .replace(/\s+/g, '')
+    .trim();
+  return textOnly.length < 5 && item.contentImages.length > 0;
 }
 
 /** Steam 공지 페이지에서 본문 가져오기 (curl) */
@@ -242,7 +251,13 @@ export async function fetchRecentPosts(source: 'steam' | 'twitter', count = 3) {
 
 /** AI로 요약 후 메시지 빌드 */
 async function buildNotificationWithSummary(item: FeedItem, source: string) {
-  if (item.description && item.description.length > 50) {
+  // 티저 트윗(태그+이미지만)이거나 본문이 짧으면 AI 요약 스킵
+  if (isTeaserTweet(item)) {
+    return await buildNotificationMessage(item, source);
+  }
+
+  // 본문이 충분히 길 때만 요약
+  if (item.description && item.description.length > 100) {
     const summary = await summarizeWithGemini(item.description);
     if (summary) {
       return await buildNotificationMessage(
@@ -278,11 +293,21 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
     console.error('[Banner] 배너 생성 실패:', err);
   }
 
-  // 소스 라벨 + 제목 (텍스트로도 표시)
+  // 소스 라벨 + 제목 (태그 분리)
   const sourceLabel = source === 'steam' ? '🎮 [Steam] Limbus Company 소식' : '🐦 [X] Limbus Company 소식';
+  const tags = item.title.match(/#\S+/g) ?? [];
+  const titleWithoutTags = item.title.replace(/#\S+/g, '').replace(/\s+/g, ' ').trim();
+  const titleDisplay = titleWithoutTags || item.title;
+
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`## ${sourceLabel}\n# ${item.title}`)
+    new TextDisplayBuilder().setContent(`## ${sourceLabel}\n# ${titleDisplay}`)
   );
+
+  if (tags.length > 0) {
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`-# ${tags.join(' ')}`)
+    );
+  }
 
   // 본문
   if (item.description) {
