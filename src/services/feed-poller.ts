@@ -1,9 +1,8 @@
-import { type Client, ContainerBuilder, TextDisplayBuilder, FileBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, type MessageActionRowComponentBuilder, MessageFlags, AttachmentBuilder, type TextChannel } from 'discord.js';
+import { type Client, ContainerBuilder, TextDisplayBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, type MessageActionRowComponentBuilder, MessageFlags, AttachmentBuilder, type TextChannel } from 'discord.js';
 import { generateBanner } from './banner.js';
 import sharp from 'sharp';
-import { getAllGuildsWithNotifications, getFeedTracker, updateFeedTracker } from '../db/guild-settings.js';
+import { getAllGuildsWithNotifications, getFeedTracker, updateFeedTracker, getGuildSentGuids, markGuildFeedSent, cleanupOldFeedHistory } from '../db/guild-settings.js';
 import { summarizeWithGemini } from './gemini.js';
-import { config } from '../config.js';
 
 
 const STEAM_APP_ID = '1973530';
@@ -105,14 +104,20 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
 
 const NITTER_URL = 'https://nitter.net/LimbusCompany_B/rss';
 
-/** curl로 RSS 가져오기 (Node fetch가 빈 응답 반환하는 문제 우회) */
-async function fetchWithCurl(url: string): Promise<string> {
-  const { execSync } = await import('child_process');
+/** HTTP fetch with User-Agent (논블로킹) */
+async function fetchWithUA(url: string): Promise<string> {
   try {
-    return execSync(`curl -sL --max-time 15 "${url}" -H "User-Agent: Mozilla/5.0"`, {
-      encoding: 'utf-8',
-      timeout: 20000,
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LimbusBot/1.0)' },
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
+
+    if (!res.ok) return '';
+    return await res.text();
   } catch {
     return '';
   }
@@ -121,7 +126,7 @@ async function fetchWithCurl(url: string): Promise<string> {
 /** Twitter(Nitter) RSS 피드 가져오기 */
 async function fetchTwitterFeed(): Promise<FeedItem[]> {
   try {
-    const xml = await fetchWithCurl(NITTER_URL);
+    const xml = await fetchWithUA(NITTER_URL);
     if (!xml || !xml.includes('<item>')) {
       console.warn('[Feed] Nitter RSS 비어있음');
       return [];
@@ -167,11 +172,20 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
 /** 이미지 다운로드 후 밝기 올리기 (어두운 티저용) */
 async function brightenImage(imageUrl: string): Promise<Buffer | null> {
   try {
-    const { execSync } = await import('child_process');
-    const imgData = execSync(`curl -sL --max-time 10 "${imageUrl}"`, { maxBuffer: 10 * 1024 * 1024 });
-    if (imgData.length === 0) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
-    return await sharp(imgData)
+    const res = await fetch(imageUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LimbusBot/1.0)' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return null;
+    const arrayBuf = await res.arrayBuffer();
+    if (arrayBuf.byteLength === 0) return null;
+
+    return await sharp(Buffer.from(arrayBuf))
       .modulate({ brightness: 6 })
       .jpeg({ quality: 85 })
       .toBuffer();
@@ -404,58 +418,64 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
   return { container, bannerFile, extraFiles: allFiles };
 }
 
-// 실패한 길드 재시도 큐
 type BuiltMessage = { container: ContainerBuilder; bannerFile: AttachmentBuilder | null; extraFiles: AttachmentBuilder[] };
-const retryQueue = new Map<string, BuiltMessage[]>();
 
-/** 새 피드 확인 & 알림 전송 */
-async function checkAndNotify(client: Client, source: string, items: FeedItem[]) {
-  if (items.length === 0) return;
+// 서버 주인 DM 스팸 방지: 길드별 마지막 DM 전송 시각
+const ownerDmCooldown = new Map<string, number>();
+const DM_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24시간
 
-  const tracker = await getFeedTracker(source);
-  const lastId = tracker?.last_id;
+/** 서버 주인에게 알림 전송 실패 DM */
+async function notifyOwner(
+  client: Client,
+  guildId: string,
+  channelId: string,
+  reason: string,
+): Promise<void> {
+  const lastDm = ownerDmCooldown.get(guildId) ?? 0;
+  if (Date.now() - lastDm < DM_COOLDOWN_MS) return;
 
-  // 새 아이템 찾기 (lastId보다 앞에 있는 것만 = 더 새로운 것)
-  let newItems: FeedItem[] = [];
-  if (lastId) {
-    const lastIndex = items.findIndex(item => item.guid === lastId);
-    if (lastIndex > 0) {
-      newItems = items.slice(0, lastIndex).slice(0, 3);
-    }
-  }
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const owner = await guild.fetchOwner();
 
-  // 트래커 업데이트
-  await updateFeedTracker(source, items[0].guid);
+    await owner.send(
+      `⚠️ **알림 전송 실패**\n` +
+      `서버 **${guild.name}**의 알림 채널 <#${channelId}>에 메시지를 보낼 수 없습니다.\n` +
+      `사유: ${reason}\n\n` +
+      `봇에게 권한을 부여하거나, \`/알림설정 채널\`로 다른 채널을 지정해주세요.`
+    );
 
-  // 재시도 큐 처리
-  await processRetryQueue(client);
-
-  if (newItems.length === 0) return;
-
-  console.log(`[Feed] ${source} 새 글 ${newItems.length}개 감지`);
-
-  // 요약 + 메시지 빌드는 한번만 → 모든 서버에 재사용
-  const builtMessages: { container: ContainerBuilder; bannerFile: AttachmentBuilder | null; extraFiles: AttachmentBuilder[] }[] = [];
-  for (const item of [...newItems].reverse()) {
-    const result = await buildNotificationWithSummary(item, source);
-    builtMessages.push(result);
-  }
-
-  // 알림 설정된 모든 길드에 전송
-  const guilds = await getAllGuildsWithNotifications();
-  const sourceField = source === 'steam' ? 'steam_enabled' : 'twitter_enabled';
-
-  for (const guild of guilds) {
-    if (guild[sourceField] === false) continue;
-    await sendBuiltMessages(client, guild.guild_id, guild.notification_channel_id, builtMessages);
+    ownerDmCooldown.set(guildId, Date.now());
+    console.log(`[Feed] 길드 ${guildId} 서버 주인에게 DM 전송 완료`);
+  } catch (dmErr) {
+    console.warn(`[Feed] 길드 ${guildId} 서버 주인 DM 실패 (차단?):`, dmErr);
   }
 }
 
-/** 빌드된 메시지를 길드에 전송 (실패 시 재시도 큐에 추가) */
-async function sendBuiltMessages(client: Client, guildId: string, channelId: string, messages: BuiltMessage[]) {
+/** 길드에 메시지 전송 (권한 체크 + 서버 주인 DM) */
+async function sendToGuild(
+  client: Client,
+  guildId: string,
+  channelId: string,
+  messages: BuiltMessage[],
+): Promise<boolean> {
   try {
     const channel = await client.channels.fetch(channelId) as TextChannel | null;
-    if (!channel?.isTextBased()) return;
+    if (!channel?.isTextBased()) {
+      await notifyOwner(client, guildId, channelId, '채널을 찾을 수 없습니다.');
+      return false;
+    }
+
+    // 권한 체크
+    const me = channel.guild.members.me;
+    if (!me) return false;
+
+    const permissions = channel.permissionsFor(me);
+    if (!permissions?.has('SendMessages') || !permissions?.has('ViewChannel')) {
+      await notifyOwner(client, guildId, channelId,
+        '봇에게 해당 채널의 **메시지 보내기** 및 **채널 보기** 권한이 없습니다.');
+      return false;
+    }
 
     for (const msg of messages) {
       await channel.send({
@@ -467,37 +487,91 @@ async function sendBuiltMessages(client: Client, guildId: string, channelId: str
         flags: MessageFlags.IsComponentsV2,
       });
     }
-
-    // 성공 시 재시도 큐에서 제거
-    retryQueue.delete(guildId);
+    return true;
   } catch (err) {
-    console.error(`[Feed] 길드 ${guildId} 전송 실패, 재시도 큐에 추가:`, err);
-    retryQueue.set(guildId, messages);
+    console.error(`[Feed] 길드 ${guildId} 전송 실패:`, err);
+    await notifyOwner(client, guildId, channelId, '메시지 전송 중 오류가 발생했습니다.');
+    return false;
   }
 }
 
-/** 재시도 큐 처리 */
-async function processRetryQueue(client: Client) {
-  if (retryQueue.size === 0) return;
+/** 새 피드 확인 & 길드별 알림 전송 */
+async function checkAndNotify(client: Client, source: string, items: FeedItem[]) {
+  if (items.length === 0) return;
 
-  console.log(`[Feed] 재시도 큐: ${retryQueue.size}개 길드`);
+  // 1. 글로벌 기준으로 후보 새 글 필터링
+  const tracker = await getFeedTracker(source);
+  let candidateItems: FeedItem[] = [];
 
-  const guilds = await getAllGuildsWithNotifications();
-  const guildMap = new Map(guilds.map(g => [g.guild_id, g.notification_channel_id]));
-
-  for (const [guildId, messages] of retryQueue) {
-    const channelId = guildMap.get(guildId);
-    if (!channelId) {
-      retryQueue.delete(guildId);
-      continue;
+  if (tracker?.last_pub_date) {
+    // 시간 기반: last_pub_date 이후 글만
+    const lastDate = new Date(tracker.last_pub_date).getTime();
+    candidateItems = items.filter(item => {
+      const itemDate = new Date(item.pubDate).getTime();
+      return !isNaN(itemDate) && itemDate > lastDate;
+    });
+  } else if (tracker?.last_id) {
+    // fallback: guid 위치 기반 (기존 로직)
+    const lastIndex = items.findIndex(item => item.guid === tracker.last_id);
+    if (lastIndex > 0) {
+      candidateItems = items.slice(0, lastIndex);
     }
-    await sendBuiltMessages(client, guildId, channelId, messages);
+    // lastId를 못 찾으면 새 글 없음으로 처리 (안전)
+  } else {
+    // 첫 폴링: tracker 초기화만 하고 발송하지 않음
+    await updateFeedTracker(source, items[0].guid, items[0].pubDate);
+    return;
   }
+
+  // 최대 5개 제한 (비정상 대량 감지 방지)
+  candidateItems = candidateItems.slice(0, 5);
+
+  if (candidateItems.length === 0) return;
+
+  console.log(`[Feed] ${source} 새 글 ${candidateItems.length}개 감지`);
+
+  // 2. 메시지 빌드 (한번만)
+  const builtMessages: Array<{ item: FeedItem; msg: BuiltMessage }> = [];
+  for (const item of [...candidateItems].reverse()) {
+    const msg = await buildNotificationWithSummary(item, source);
+    builtMessages.push({ item, msg });
+  }
+
+  // 3. 길드별 전송
+  const guilds = await getAllGuildsWithNotifications();
+  const sourceField = source === 'steam' ? 'steam_enabled' : 'twitter_enabled';
+
+  for (const guild of guilds) {
+    if (guild[sourceField] === false) continue;
+
+    // 이미 발송된 guid 제외
+    const allGuids = builtMessages.map(b => b.item.guid);
+    const sentGuids = await getGuildSentGuids(guild.guild_id, source, allGuids);
+    const unsent = builtMessages.filter(b => !sentGuids.has(b.item.guid));
+
+    if (unsent.length === 0) continue;
+
+    const success = await sendToGuild(
+      client, guild.guild_id, guild.notification_channel_id,
+      unsent.map(u => u.msg),
+    );
+
+    // 전송 성공한 항목 기록
+    if (success) {
+      for (const { item } of unsent) {
+        await markGuildFeedSent(guild.guild_id, source, item.guid, item.pubDate);
+      }
+    }
+  }
+
+  // 4. 글로벌 tracker 갱신 (가장 최신 글 기준)
+  const newest = candidateItems[0];
+  await updateFeedTracker(source, newest.guid, newest.pubDate);
 }
 
 /** 피드 폴링 시작 */
 export function startFeedPoller(client: Client) {
-  console.log('[Feed] Steam 폴링 5분 / Twitter 폴링 30분 간격');
+  console.log('[Feed] Steam 폴링 5분 / Twitter 폴링 5분 간격');
 
   const pollSteam = async () => {
     try {
@@ -527,4 +601,14 @@ export function startFeedPoller(client: Client) {
     pollTwitter();
     setInterval(pollTwitter, TWITTER_POLL_INTERVAL);
   }, 30_000);
+
+  // 24시간마다 오래된 이력 정리
+  setInterval(async () => {
+    try {
+      const deleted = await cleanupOldFeedHistory(30);
+      if (deleted > 0) console.log(`[Feed] 오래된 이력 ${deleted}건 삭제`);
+    } catch (err) {
+      console.error('[Feed] 이력 정리 실패:', err);
+    }
+  }, 24 * 60 * 60 * 1000);
 }

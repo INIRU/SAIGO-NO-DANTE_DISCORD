@@ -17,26 +17,39 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
 
   await interaction.deferUpdate();
 
-  switch (action) {
-    case 'switch_identity':
-    case 'select_identity': {
-      const uptie = 4;
-      const identity = await getIdentityById(selectedId);
-      const [skills, siblings] = await Promise.all([
-        getSkillsByIdentity(selectedId, uptie),
-        getIdentitiesBySinner(identity.sinner_id),
-      ]);
+  try {
+    switch (action) {
+      case 'switch_identity':
+      case 'select_identity': {
+        const uptie = 4;
+        const identity = await getIdentityById(selectedId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.', components: [] });
+          return;
+        }
+        const [skills, siblings] = await Promise.all([
+          getSkillsByIdentity(selectedId, uptie),
+          getIdentitiesBySinner(identity.sinner_id),
+        ]);
 
-      const container = buildIdentityView(identity, skills, siblings, uptie);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
+        const container = buildIdentityView(identity, skills, siblings, uptie);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
 
-    case 'select_ego': {
-      const ego = await getEgoById(selectedId);
-      const container = buildEgoView(ego);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
+      case 'select_ego': {
+        const ego = await getEgoById(selectedId);
+        if (!ego) {
+          await interaction.editReply({ content: 'E.G.O 데이터를 찾을 수 없습니다.', components: [] });
+          return;
+        }
+        const container = buildEgoView(ego);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
     }
+  } catch (err) {
+    console.error(`[SelectMenu] ${action}:${selectedId} 처리 실패:`, err);
+    await interaction.editReply({ content: '데이터를 불러오는 중 오류가 발생했습니다.' }).catch(() => {});
   }
 }

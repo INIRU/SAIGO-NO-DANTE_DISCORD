@@ -20,168 +20,224 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   await interaction.deferUpdate();
 
-  switch (action) {
-    case 'skill_detail': {
-      const identityId = params[0];
-      const uptie = parseInt(params[1], 10) || 4;
-      const identity = await getIdentityById(identityId);
-      const skills = await getSkillsByIdentity(identityId, uptie);
-      if (skills.length === 0) return;
-      const metaMap = computeSkillMeta(skills);
+  try {
+    switch (action) {
+      case 'skill_detail': {
+        const identityId = params[0];
+        const uptie = parseInt(params[1], 10) || 4;
+        const identity = await getIdentityById(identityId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+        const skills = await getSkillsByIdentity(identityId, uptie);
+        if (skills.length === 0) return;
+        const metaMap = computeSkillMeta(skills);
 
-      const container = buildSkillDetailView(identity, skills[0], skills.length, 0, uptie, undefined, metaMap.get(skills[0].id));
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'skill_nav': {
-      const identityId = params[0];
-      const index = parseInt(params[1], 10);
-      const uptie = parseInt(params[2], 10) || 4;
-      const identity = await getIdentityById(identityId);
-      const skills = await getSkillsByIdentity(identityId, uptie);
-      const clampedIndex = Math.max(0, Math.min(index, skills.length - 1));
-      const metaMap = computeSkillMeta(skills);
-
-      const container = buildSkillDetailView(identity, skills[clampedIndex], skills.length, clampedIndex, uptie, undefined, metaMap.get(skills[clampedIndex].id));
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'passive': {
-      const identityId = params[0];
-      const uptie = parseInt(params[1], 10) || 4;
-      const identity = await getIdentityById(identityId);
-      let passives = await getPassivesByIdentity(identityId, uptie);
-      // uptie 4에 패시브가 없으면 3으로 폴백
-      if (passives.length === 0 && uptie === 4) {
-        passives = await getPassivesByIdentity(identityId, 3);
+        const container = buildSkillDetailView(identity, skills[0], skills.length, 0, uptie, undefined, metaMap.get(skills[0].id));
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
       }
 
-      const container = buildPassiveView(identity, passives, uptie);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
+      case 'skill_nav': {
+        const identityId = params[0];
+        const index = parseInt(params[1], 10);
+        const uptie = parseInt(params[2], 10) || 4;
+        const identity = await getIdentityById(identityId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+        const skills = await getSkillsByIdentity(identityId, uptie);
+        const clampedIndex = Math.max(0, Math.min(index, skills.length - 1));
+        const metaMap = computeSkillMeta(skills);
 
-    case 'def_skill': {
-      const identityId = params[0];
-      const uptie = parseInt(params[1], 10) || 4;
-      const identity = await getIdentityById(identityId);
-      const skills = await getSkillsByIdentity(identityId, uptie);
-      const defIndex = skills.findIndex(s =>
-        s.skill_type === 'evade' || s.skill_type === 'defense' || s.skill_type === 'counter'
-      );
-      if (defIndex < 0) return;
-      const metaMap = computeSkillMeta(skills);
-
-      const container = buildSkillDetailView(identity, skills[defIndex], skills.length, defIndex, uptie, undefined, metaMap.get(skills[defIndex].id));
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'uptie_toggle': {
-      const identityId = params[0];
-      const uptie = parseInt(params[1], 10) || 4;
-      const identity = await getIdentityById(identityId);
-      const [skills, siblings] = await Promise.all([
-        getSkillsByIdentity(identityId, uptie),
-        getIdentitiesBySinner(identity.sinner_id),
-      ]);
-
-      const container = buildIdentityView(identity, skills, siblings, uptie);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'passive_nav': {
-      const identityId = params[0];
-      const uptie = parseInt(params[1], 10) || 4;
-      const page = parseInt(params[2], 10) || 0;
-      const identity = await getIdentityById(identityId);
-      let passives = await getPassivesByIdentity(identityId, uptie);
-      if (passives.length === 0 && uptie === 4) {
-        passives = await getPassivesByIdentity(identityId, 3);
+        const container = buildSkillDetailView(identity, skills[clampedIndex], skills.length, clampedIndex, uptie, undefined, metaMap.get(skills[clampedIndex].id));
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
       }
 
-      const container = buildPassiveView(identity, passives, uptie, page);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
+      case 'passive': {
+        const identityId = params[0];
+        const uptie = parseInt(params[1], 10) || 4;
+        const identity = await getIdentityById(identityId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+        let passives = await getPassivesByIdentity(identityId, uptie);
+        // uptie 4에 패시브가 없으면 3으로 폴백
+        if (passives.length === 0 && uptie === 4) {
+          passives = await getPassivesByIdentity(identityId, 3);
+        }
+
+        const container = buildPassiveView(identity, passives, uptie);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'def_skill': {
+        const identityId = params[0];
+        const uptie = parseInt(params[1], 10) || 4;
+        const identity = await getIdentityById(identityId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+        const skills = await getSkillsByIdentity(identityId, uptie);
+        const defIndex = skills.findIndex(s =>
+          s.skill_type === 'evade' || s.skill_type === 'defense' || s.skill_type === 'counter'
+        );
+        if (defIndex < 0) return;
+        const metaMap = computeSkillMeta(skills);
+
+        const container = buildSkillDetailView(identity, skills[defIndex], skills.length, defIndex, uptie, undefined, metaMap.get(skills[defIndex].id));
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'uptie_toggle': {
+        const identityId = params[0];
+        const uptie = parseInt(params[1], 10) || 4;
+        const identity = await getIdentityById(identityId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+        const [skills, siblings] = await Promise.all([
+          getSkillsByIdentity(identityId, uptie),
+          getIdentitiesBySinner(identity.sinner_id),
+        ]);
+
+        const container = buildIdentityView(identity, skills, siblings, uptie);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'passive_nav': {
+        const identityId = params[0];
+        const uptie = parseInt(params[1], 10) || 4;
+        const page = parseInt(params[2], 10) || 0;
+        const identity = await getIdentityById(identityId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+        let passives = await getPassivesByIdentity(identityId, uptie);
+        if (passives.length === 0 && uptie === 4) {
+          passives = await getPassivesByIdentity(identityId, 3);
+        }
+
+        const container = buildPassiveView(identity, passives, uptie, page);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'back_identity': {
+        const identityId = params[0];
+        const uptie = parseInt(params[1], 10) || 4;
+        const identity = await getIdentityById(identityId);
+        if (!identity) {
+          await interaction.editReply({ content: '인격 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+        const [skills, siblings] = await Promise.all([
+          getSkillsByIdentity(identityId, uptie),
+          getIdentitiesBySinner(identity.sinner_id),
+        ]);
+
+        const container = buildIdentityView(identity, skills, siblings, uptie);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'ego_toggle': {
+        const egoId = params[0];
+        const mode = params[1];
+        const construe = parseInt(params[2], 10) || 4;
+        const ego = await getEgoById(egoId);
+        if (!ego) {
+          await interaction.editReply({ content: 'E.G.O 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+
+        const container = buildEgoView(ego, mode === 'corrosion', construe);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'ego_construe': {
+        const egoId = params[0];
+        const mode = params[1];
+        const construe = parseInt(params[2], 10) || 4;
+        const ego = await getEgoById(egoId);
+        if (!ego) {
+          await interaction.editReply({ content: 'E.G.O 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+
+        const container = buildEgoView(ego, mode === 'corrosion', construe);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'ego_passive': {
+        const egoId = params[0];
+        const ego = await getEgoById(egoId);
+        if (!ego) {
+          await interaction.editReply({ content: 'E.G.O 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+
+        const container = buildEgoPassiveView(ego);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'back_ego': {
+        const egoId = params[0];
+        const ego = await getEgoById(egoId);
+        if (!ego) {
+          await interaction.editReply({ content: 'E.G.O 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+
+        const container = buildEgoView(ego);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'gift_tab': {
+        const giftId = params[0];
+        const tab = params[1] || 'base';
+        const gift = await getEgoGiftById(giftId);
+        if (!gift) {
+          await interaction.editReply({ content: '기프트 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+
+        const container = buildEgoGiftView(gift, tab);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
+
+      case 'kw_page': {
+        const keywordName = params[0];
+        const page = parseInt(params[1], 10);
+        const keyword = await getKeywordMeta(keywordName);
+        if (!keyword) {
+          await interaction.editReply({ content: '키워드 데이터를 찾을 수 없습니다.' });
+          return;
+        }
+
+        const identities = await getIdentitiesByKeyword(keyword.name);
+        const container = buildKeywordView(keyword, identities, page);
+        await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        break;
+      }
     }
-
-    case 'back_identity': {
-      const identityId = params[0];
-      const uptie = parseInt(params[1], 10) || 4;
-      const identity = await getIdentityById(identityId);
-      const [skills, siblings] = await Promise.all([
-        getSkillsByIdentity(identityId, uptie),
-        getIdentitiesBySinner(identity.sinner_id),
-      ]);
-
-      const container = buildIdentityView(identity, skills, siblings, uptie);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'ego_toggle': {
-      const egoId = params[0];
-      const mode = params[1];
-      const construe = parseInt(params[2], 10) || 4;
-      const ego = await getEgoById(egoId);
-
-      const container = buildEgoView(ego, mode === 'corrosion', construe);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'ego_construe': {
-      const egoId = params[0];
-      const mode = params[1];
-      const construe = parseInt(params[2], 10) || 4;
-      const ego = await getEgoById(egoId);
-
-      const container = buildEgoView(ego, mode === 'corrosion', construe);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'ego_passive': {
-      const egoId = params[0];
-      const ego = await getEgoById(egoId);
-
-      const container = buildEgoPassiveView(ego);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'back_ego': {
-      const egoId = params[0];
-      const ego = await getEgoById(egoId);
-
-      const container = buildEgoView(ego);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'gift_tab': {
-      const giftId = params[0];
-      const tab = params[1] || 'base';
-      const gift = await getEgoGiftById(giftId);
-
-      const container = buildEgoGiftView(gift, tab);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
-
-    case 'kw_page': {
-      const keywordName = params[0];
-      const page = parseInt(params[1], 10);
-      const keyword = await getKeywordMeta(keywordName);
-      if (!keyword) return;
-
-      const identities = await getIdentitiesByKeyword(keyword.name);
-      const container = buildKeywordView(keyword, identities, page);
-      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
-      break;
-    }
+  } catch (err) {
+    console.error(`[Button] ${action} 처리 실패:`, err);
+    await interaction.editReply({ content: '데이터를 불러오는 중 오류가 발생했습니다.' }).catch(() => {});
   }
 }
