@@ -104,20 +104,14 @@ async function fetchSteamFeed(): Promise<FeedItem[]> {
 
 const NITTER_URL = 'https://nitter.net/LimbusCompany_B/rss';
 
-/** HTTP fetch with User-Agent (논블로킹) */
-async function fetchWithUA(url: string): Promise<string> {
+/** curl로 RSS 가져오기 (Nitter가 Node fetch를 거부하므로 curl 필수) */
+async function fetchWithCurl(url: string): Promise<string> {
+  const { execSync } = await import('child_process');
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LimbusBot/1.0)' },
-      signal: controller.signal,
+    return execSync(`curl -sL --max-time 15 "${url}" -H "User-Agent: Mozilla/5.0"`, {
+      encoding: 'utf-8',
+      timeout: 20000,
     });
-    clearTimeout(timeout);
-
-    if (!res.ok) return '';
-    return await res.text();
   } catch {
     return '';
   }
@@ -126,7 +120,7 @@ async function fetchWithUA(url: string): Promise<string> {
 /** Twitter(Nitter) RSS 피드 가져오기 */
 async function fetchTwitterFeed(): Promise<FeedItem[]> {
   try {
-    const xml = await fetchWithUA(NITTER_URL);
+    const xml = await fetchWithCurl(NITTER_URL);
     if (!xml || !xml.includes('<item>')) {
       console.warn('[Feed] Nitter RSS 비어있음');
       return [];
@@ -172,20 +166,11 @@ async function fetchTwitterFeed(): Promise<FeedItem[]> {
 /** 이미지 다운로드 후 밝기 올리기 (어두운 티저용) */
 async function brightenImage(imageUrl: string): Promise<Buffer | null> {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const { execSync } = await import('child_process');
+    const imgData = execSync(`curl -sL --max-time 10 "${imageUrl}"`, { maxBuffer: 10 * 1024 * 1024 });
+    if (imgData.length === 0) return null;
 
-    const res = await fetch(imageUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LimbusBot/1.0)' },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) return null;
-    const arrayBuf = await res.arrayBuffer();
-    if (arrayBuf.byteLength === 0) return null;
-
-    return await sharp(Buffer.from(arrayBuf))
+    return await sharp(imgData)
       .modulate({ brightness: 6 })
       .jpeg({ quality: 85 })
       .toBuffer();
