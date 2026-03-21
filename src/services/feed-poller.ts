@@ -405,39 +405,7 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
 
 type BuiltMessage = { container: ContainerBuilder; bannerFile: AttachmentBuilder | null; extraFiles: AttachmentBuilder[] };
 
-// 서버 주인 DM 스팸 방지: 길드별 마지막 DM 전송 시각
-const ownerDmCooldown = new Map<string, number>();
-const DM_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24시간
-
-/** 서버 주인에게 알림 전송 실패 DM */
-async function notifyOwner(
-  client: Client,
-  guildId: string,
-  channelId: string,
-  reason: string,
-): Promise<void> {
-  const lastDm = ownerDmCooldown.get(guildId) ?? 0;
-  if (Date.now() - lastDm < DM_COOLDOWN_MS) return;
-
-  try {
-    const guild = await client.guilds.fetch(guildId);
-    const owner = await guild.fetchOwner();
-
-    await owner.send(
-      `⚠️ **알림 전송 실패**\n` +
-      `서버 **${guild.name}**의 알림 채널 <#${channelId}>에 메시지를 보낼 수 없습니다.\n` +
-      `사유: ${reason}\n\n` +
-      `봇에게 권한을 부여하거나, \`/알림설정 채널\`로 다른 채널을 지정해주세요.`
-    );
-
-    ownerDmCooldown.set(guildId, Date.now());
-    console.log(`[Feed] 길드 ${guildId} 서버 주인에게 DM 전송 완료`);
-  } catch (dmErr) {
-    console.warn(`[Feed] 길드 ${guildId} 서버 주인 DM 실패 (차단?):`, dmErr);
-  }
-}
-
-/** 길드에 메시지 전송 (권한 체크 + 서버 주인 DM) */
+/** 길드에 메시지 전송 (권한 체크) */
 async function sendToGuild(
   client: Client,
   guildId: string,
@@ -447,7 +415,7 @@ async function sendToGuild(
   try {
     const channel = await client.channels.fetch(channelId) as TextChannel | null;
     if (!channel?.isTextBased()) {
-      await notifyOwner(client, guildId, channelId, '채널을 찾을 수 없습니다.');
+      console.warn(`[Feed] 길드 ${guildId} 채널 ${channelId}을 찾을 수 없음`);
       return false;
     }
 
@@ -457,8 +425,7 @@ async function sendToGuild(
 
     const permissions = channel.permissionsFor(me);
     if (!permissions?.has('SendMessages') || !permissions?.has('ViewChannel')) {
-      await notifyOwner(client, guildId, channelId,
-        '봇에게 해당 채널의 **메시지 보내기** 및 **채널 보기** 권한이 없습니다.');
+      console.warn(`[Feed] 길드 ${guildId} 채널 ${channelId} 권한 없음`);
       return false;
     }
 
@@ -475,7 +442,6 @@ async function sendToGuild(
     return true;
   } catch (err) {
     console.error(`[Feed] 길드 ${guildId} 전송 실패:`, err);
-    await notifyOwner(client, guildId, channelId, '메시지 전송 중 오류가 발생했습니다.');
     return false;
   }
 }
