@@ -12,7 +12,7 @@ import {
 } from 'discord.js';
 import { SITE_COLORS } from '../constants/colors.js';
 import { urls } from '../constants/urls.js';
-import { sinnerEmoji, rarityEmoji } from '../utils/format.js';
+import { sinnerEmoji, rarityEmoji, gradeEmoji } from '../utils/format.js';
 
 
 interface SinnerData {
@@ -48,13 +48,13 @@ export function buildSinnerView(
   const container = new ContainerBuilder()
     .setAccentColor(SITE_COLORS.gold);
 
-  // 헤더
+  // ── 헤더 ──
   const thumbUrl = urls.sinnerIcon(sinner.id);
 
   const headerText = new TextDisplayBuilder()
     .setContent(
       `${sinnerEmoji(sinner.id)} **${sinner.name_kr}** (${sinner.name})` +
-      (sinner.literary_source ? `\n📖 ${sinner.literary_source}` : '')
+      (sinner.literary_source ? `\n-# 📖 ${sinner.literary_source}` : '')
     );
 
   const section = new SectionBuilder()
@@ -69,17 +69,19 @@ export function buildSinnerView(
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  // 인격 목록
+  // ── 인격 목록 ──
   if (identities.length > 0) {
-    const idLines = identities.slice(0, 15).map(i =>
+    const sorted = [...identities].sort((a, b) => b.rarity - a.rarity);
+    const idLines = sorted.slice(0, 15).map(i =>
       `${rarityEmoji(i.rarity)} ${i.name_kr}`
     ).join('\n');
+    const overflow = identities.length > 15 ? `\n-# ...외 ${identities.length - 15}개` : '';
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`**인격 (${identities.length}개)**\n${idLines}`)
+      new TextDisplayBuilder().setContent(`### 인격 (${identities.length})\n${idLines}${overflow}`)
     );
 
     // 인격 선택 드롭다운
-    const idOptions = identities.slice(0, 25).map(i =>
+    const idOptions = sorted.slice(0, 25).map(i =>
       new StringSelectMenuOptionBuilder()
         .setLabel(i.name_kr)
         .setDescription(`${i.rarity}성`)
@@ -90,28 +92,31 @@ export function buildSinnerView(
       .addComponents(
         new StringSelectMenuBuilder()
           .setCustomId(`select_identity:${sinner.id}`)
-          .setPlaceholder('인격 상세 보기')
+          .setPlaceholder('📋 인격 상세 보기')
           .addOptions(idOptions)
       );
 
     container.addActionRowComponents(idSelect);
   }
 
-  // 사이트 홍보
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-  );
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent('-# [saigo-no-dante.com](https://saigo-no-dante.com) | 최애의 관리자')
-  );
-
-  // EGO 선택 드롭다운
+  // ── EGO 목록 ──
   if (egos.length > 0) {
     container.addSeparatorComponents(
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    const egoOptions = egos.slice(0, 25).map(e =>
+    const gradeOrder = ['ZAYIN', 'TETH', 'HE', 'WAW', 'ALEPH'];
+    const sorted = [...egos].sort((a, b) => gradeOrder.indexOf(a.grade) - gradeOrder.indexOf(b.grade));
+
+    const egoLines = sorted.slice(0, 15).map(e =>
+      `${gradeEmoji(e.grade)} ${e.name_kr ?? e.name}`
+    ).join('\n');
+    const overflow = egos.length > 15 ? `\n-# ...외 ${egos.length - 15}개` : '';
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`### E.G.O (${egos.length})\n${egoLines}${overflow}`)
+    );
+
+    const egoOptions = sorted.slice(0, 25).map(e =>
       new StringSelectMenuOptionBuilder()
         .setLabel(e.name_kr ?? e.name)
         .setDescription(e.grade)
@@ -122,12 +127,20 @@ export function buildSinnerView(
       .addComponents(
         new StringSelectMenuBuilder()
           .setCustomId(`select_ego:${sinner.id}`)
-          .setPlaceholder(`E.G.O 상세 보기 (${egos.length}개)`)
+          .setPlaceholder(`🔮 E.G.O 상세 보기`)
           .addOptions(egoOptions)
       );
 
     container.addActionRowComponents(egoSelect);
   }
+
+  // ── 푸터 ──
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent('-# [saigo-no-dante.com](https://saigo-no-dante.com) | 최애의 관리자')
+  );
 
   return container;
 }

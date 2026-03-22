@@ -9,9 +9,13 @@ import * as keywordCmd from './commands/keyword.js';
 import * as egoGiftCmd from './commands/ego-gift.js';
 import * as helpCmd from './commands/help.js';
 import * as notificationCmd from './commands/notification.js';
+import * as ticketCmd from './commands/ticket.js';
+import * as warnCmd from './commands/warn.js';
+import * as manageCmd from './commands/manage.js';
 import { startFeedPoller } from './services/feed-poller.js';
 
-const commandData = [
+// 글로벌 커맨드
+const globalCommandData = [
   identityCmd.data.toJSON(),
   egoCmd.data.toJSON(),
   sinnerCmd.data.toJSON(),
@@ -21,8 +25,21 @@ const commandData = [
   notificationCmd.data.toJSON(),
 ];
 
+// 메인 서버 전용 커맨드
+const guildCommandData = [
+  ticketCmd.data.toJSON(),
+  warnCmd.data.toJSON(),
+  manageCmd.data.toJSON(),
+];
+
+const MAIN_GUILD_ID = '1477908541871493253';
+
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
 client.once(Events.ClientReady, async (c) => {
@@ -37,11 +54,22 @@ client.once(Events.ClientReady, async (c) => {
   // dev 모드일 때 길드 커맨드 즉시 등록
   if (config.isDev && config.discord.devGuildId) {
     const rest = new REST({ version: '10' }).setToken(config.discord.token);
+    // 테스트 서버에 글로벌+길드 커맨드 모두 등록
     await rest.put(
       Routes.applicationGuildCommands(config.discord.clientId, config.discord.devGuildId),
-      { body: commandData },
+      { body: [...globalCommandData, ...guildCommandData] },
     );
     console.log(`[Bot] 테스트 서버(${config.discord.devGuildId})에 길드 커맨드 등록 완료!`);
+  }
+
+  // 메인 서버에 전용 커맨드 등록
+  if (!config.isDev) {
+    const rest = new REST({ version: '10' }).setToken(config.discord.token);
+    await rest.put(
+      Routes.applicationGuildCommands(config.discord.clientId, MAIN_GUILD_ID),
+      { body: guildCommandData },
+    );
+    console.log(`[Bot] 메인 서버(${MAIN_GUILD_ID})에 길드 커맨드 등록 완료!`);
   }
 
   // 피드 폴링 시작

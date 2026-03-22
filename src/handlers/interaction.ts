@@ -6,8 +6,12 @@ import * as keywordCmd from '../commands/keyword.js';
 import * as egoGiftCmd from '../commands/ego-gift.js';
 import * as helpCmd from '../commands/help.js';
 import * as notificationCmd from '../commands/notification.js';
+import * as ticketCmd from '../commands/ticket.js';
+import * as warnCmd from '../commands/warn.js';
+import * as manageCmd from '../commands/manage.js';
 import { handleButton } from './button-handler.js';
 import { handleSelectMenu } from './select-handler.js';
+import { handleTicketButton } from './ticket-handler.js';
 
 interface Command {
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
@@ -22,6 +26,9 @@ const commands = new Map<string, Command>([
   ['기프트', egoGiftCmd],
   ['도움말', helpCmd],
   ['알림설정', notificationCmd],
+  ['티켓', ticketCmd],
+  ['경고', warnCmd],
+  ['관리', manageCmd],
 ]);
 
 export async function handleInteraction(interaction: Interaction) {
@@ -49,7 +56,12 @@ export async function handleInteraction(interaction: Interaction) {
     }
 
     if (interaction.isButton()) {
-      await handleButton(interaction);
+      const ticketActions = ['create_ticket', 'close_ticket'];
+      if (ticketActions.includes(interaction.customId)) {
+        await handleTicketButton(interaction);
+      } else {
+        await handleButton(interaction);
+      }
       return;
     }
 
