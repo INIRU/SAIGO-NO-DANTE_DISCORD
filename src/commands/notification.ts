@@ -140,9 +140,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       await interaction.deferReply();
       const result = await fetchLatestSteamPost();
       if (result) {
+        const files = [
+          ...(result.bannerFile ? [result.bannerFile] : []),
+          ...result.extraFiles,
+        ];
         await interaction.editReply({
           components: [result.container],
-          files: result.extraFiles ?? (result.bannerFile ? [result.bannerFile] : []),
+          files,
           flags: MessageFlags.IsComponentsV2,
         });
       } else {
@@ -177,9 +181,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       }
 
       for (const result of results.reverse()) {
+        const files = [
+          ...(result.bannerFile ? [result.bannerFile] : []),
+          ...result.extraFiles,
+        ];
         await targetChannel.send({
           components: [result.container],
-          files: result.extraFiles ?? (result.bannerFile ? [result.bannerFile] : []),
+          files,
           flags: MessageFlags.IsComponentsV2,
         });
       }

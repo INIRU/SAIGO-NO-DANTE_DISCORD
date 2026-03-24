@@ -399,8 +399,7 @@ async function buildNotificationMessage(item: FeedItem, source: string, aiModel?
     container.addActionRowComponents(buttons);
   }
 
-  const allFiles = [bannerFile, ...extraFiles].filter(Boolean) as AttachmentBuilder[];
-  return { container, bannerFile, extraFiles: allFiles };
+  return { container, bannerFile, extraFiles };
 }
 
 type BuiltMessage = { container: ContainerBuilder; bannerFile: AttachmentBuilder | null; extraFiles: AttachmentBuilder[] };
@@ -430,12 +429,13 @@ async function sendToGuild(
     }
 
     for (const msg of messages) {
+      const files = [
+        ...(msg.bannerFile ? [msg.bannerFile] : []),
+        ...msg.extraFiles,
+      ];
       await channel.send({
         components: [msg.container],
-        files: [
-          ...(msg.bannerFile ? [new AttachmentBuilder(msg.bannerFile.attachment as Buffer, { name: 'banner.png' })] : []),
-          ...msg.extraFiles.map((f, i) => new AttachmentBuilder(f.attachment as Buffer, { name: `SPOILER_bright_${i}.jpg` })),
-        ],
+        files,
         flags: MessageFlags.IsComponentsV2,
       });
     }
